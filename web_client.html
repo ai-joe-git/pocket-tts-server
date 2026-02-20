@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pocket TTS - Web Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            color: white;
+            padding: 40px 20px;
+        }
+        
+        header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin: 20px 0;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+        
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .voice-card {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .voice-card:hover {
+            border-color: #667eea;
+            transform: translateY(-3px);
+        }
+        
+        .voice-card.selected {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .voice-card .icon {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .voice-card .name {
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 1em;
+            resize: vertical;
+        }
+        
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 10px 5px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .api-endpoint {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 10px 10px 0;
+        }
+        
+        .api-endpoint h4 {
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .api-endpoint code {
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .status-bar {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            display: none;
+            z-index: 1000;
+        }
+        
+        .status-bar.show {
+            display: block;
+        }
+        
+        .status-bar.success {
+            background: #28a745;
+        }
+        
+        .status-bar.error {
+            background: #dc3545;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        audio {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab:hover {
+            color: #667eea;
+        }
+        
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Pocket TTS</h1>
+            <p>Web Client - OpenAI-Compatible TTS</p>
+        </header>
+        
+        <div class="card">
+            <div class="tabs">
+                <div class="tab active" onclick="showTab('tts')">Text to Speech</div>
+                <div class="tab" onclick="showTab('voices')">Voice Library</div>
+                <div class="tab" onclick="showTab('api')">API</div>
+            </div>
+            
+            <div id="tts" class="tab-content active">
+                <h2>Generate Speech</h2>
+                
+                <div style="margin-bottom: 20px;">
+                    <label>Selected Voice: <span id="selected-voice-name">None</span></label>
+                </div>
+                
+                <textarea id="text-input" placeholder="Enter text to convert to speech..."></textarea>
+                
+                <div style="margin-top: 20px;">
+                    <button class="btn" onclick="generateSpeech()" id="generate-btn">Generate Speech</button>
+                    <button class="btn btn-secondary" onclick="clearText()">Clear</button>
+                </div>
+                
+                <div id="audio-result" class="hidden" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                    <h3>Generated Audio</h3>
+                    <audio id="audio-player" controls></audio>
+                    <br>
+                    <a id="download-link" class="btn btn-secondary" download>Download</a>
+                </div>
+            </div>
+            
+            <div id="voices" class="tab-content">
+                <h2>Available Voices</h2>
+                <p>Click on a voice to select it</p>
+                <div id="voice-grid" class="voice-grid">
+                    <!-- Voices loaded dynamically -->
+                </div>
+                
+                <button class="btn" onclick="refreshVoices()" style="margin-top: 20px;">Refresh Voice List</button>
+            </div>
+            
+            <div id="api" class="tab-content">
+                <h2>API Endpoints</h2>
+                
+                <div class="api-endpoint">
+                    <h4>List Voices</h4>
+                    <p><strong>GET</strong> <code>/v1/audio/voices</code></p>
+                </div>
+                
+                <div class="api-endpoint">
+                    <h4>Text to Speech</h4>
+                    <p><strong>POST</strong> <code>/v1/audio/speech</code></p>
+                    <pre style="background: #2d3748; color: #e2e8f0; padding: 15px; border-radius: 10px; overflow-x: auto;">{
+  "model": "tts-1",
+  "input": "Hello, world!",
+  "voice": "barack-obama",
+  "response_format": "mp3"
+}</pre>
+                </div>
+                
+                <div class="api-endpoint">
+                    <h4>Health Check</h4>
+                    <p><strong>GET</strong> <code>/health</code></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="status-bar" class="status-bar"></div>
+    
+    <script>
+        let selectedVoice = null;
+        let voices = [];
+        const API_BASE = window.location.origin;
+        
+        // Load voices on startup
+        async function loadVoices() {
+            showStatus('Loading voices...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/v1/audio/voices`);
+                const data = await response.json();
+                voices = data.voices || [];
+                displayVoices(voices);
+                showStatus(`Loaded ${voices.length} voices`, 'success');
+            } catch (error) {
+                showStatus('Error loading voices: ' + error.message, 'error');
+            }
+        }
+        
+        function displayVoices(voiceList) {
+            const grid = document.getElementById('voice-grid');
+            grid.innerHTML = '';
+            
+            if (voiceList.length === 0) {
+                grid.innerHTML = '<p>No voices found. Add .wav files to voices-celebrities/ folder.</p>';
+                return;
+            }
+            
+            voiceList.forEach(voice => {
+                const card = document.createElement('div');
+                card.className = 'voice-card' + (selectedVoice === voice.voice_id ? ' selected' : '');
+                card.onclick = () => selectVoice(voice);
+                card.innerHTML = `
+                    <div class="icon">🎤</div>
+                    <div class="name">${voice.name}</div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+        
+        function selectVoice(voice) {
+            selectedVoice = voice.voice_id;
+            displayVoices(voices);
+            document.getElementById('selected-voice-name').textContent = voice.name;
+            showStatus(`Selected voice: ${voice.name}`, 'success');
+        }
+        
+        async function generateSpeech() {
+            const text = document.getElementById('text-input').value.trim();
+            
+            if (!text) {
+                showStatus('Please enter text to convert', 'error');
+                return;
+            }
+            
+            if (!selectedVoice) {
+                showStatus('Please select a voice first', 'error');
+                showTab('voices');
+                return;
+            }
+            
+            const btn = document.getElementById('generate-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>Generating...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/v1/audio/speech`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        input: text,
+                        voice: selectedVoice,
+                        response_format: 'mp3'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                
+                const audioPlayer = document.getElementById('audio-player');
+                const downloadLink = document.getElementById('download-link');
+                
+                audioPlayer.src = url;
+                downloadLink.href = url;
+                downloadLink.download = `speech_${selectedVoice}.mp3`;
+                
+                document.getElementById('audio-result').classList.remove('hidden');
+                showStatus('Speech generated successfully!', 'success');
+                
+            } catch (error) {
+                showStatus('Error generating speech: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Generate Speech';
+            }
+        }
+        
+        function clearText() {
+            document.getElementById('text-input').value = '';
+            document.getElementById('audio-result').classList.add('hidden');
+        }
+        
+        function refreshVoices() {
+            loadVoices();
+        }
+        
+        function showTab(tabName) {
+            // Update tabs
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+        }
+        
+        function showStatus(message, type) {
+            const statusBar = document.getElementById('status-bar');
+            statusBar.textContent = message;
+            statusBar.className = 'status-bar show ' + type;
+            
+            setTimeout(() => {
+                statusBar.classList.remove('show');
+            }, 3000);
+        }
+        
+        // Initialize
+        loadVoices();
+    </script>
+</body>
+</html>
