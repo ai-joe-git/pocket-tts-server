@@ -63,8 +63,14 @@ def load_config():
     config_path = Path("config.json")
     default_config = {
         "server": {"host": "localhost", "port": 8000},
+        "wyoming": {
+            "enabled": False,
+            "host": "0.0.0.0",
+            "port": 10300,
+        },
         "paths": {
-            "voices_dir": "voices-celebrities",
+            "voices_dir": "voices-celebrities",  # optional; pre-made/clone voices
+            "voices_pockettts_dir": "voices-pockettts",  # user uploads (Pocket TTS)
             "voices_piper_dir": "voices-piper",
             "output_dir": "output",
         },
@@ -205,48 +211,86 @@ def _piper_synthesize_to_wav_bytes(voice_id, text):
         return None
 
 
-def scan_voices():
-    """Scan voice files and auto-convert MP3/OGG/FLAC to WAV with archiving"""
-    voices = []
-    voices_dir = Path(config["paths"]["voices_dir"])
+def _synthesize_to_pcm_sync(text: str, voice_id: Optional[str]):
+    """Synthesize text to raw PCM (16-bit mono). Returns (sample_rate, pcm_bytes) or None. For Wyoming."""
+    if not voice_id and available_voices:
+        voice_id = next(iter(available_voices.keys()), None)
+    voice_state = get_voice_state(voice_id) if voice_id else None
+    if not voice_state and voice_states:
+        voice_state = voice_states.get("default") or next(iter(voice_states.values()), None)
+    if not voice_state:
+        return None
+    try:
+        if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
+            vid = voice_state["voice_id"]
+            voice = _get_piper_voice(vid)
+            if not voice:
+                return None
+            chunks = list(voice.synthesize(text))
+            if not chunks:
+                return None
+            rate = getattr(chunks[0], "sample_rate", 22050)
+            pcm = b"".join(c.audio_int16_bytes for c in chunks)
+            return (rate, pcm)
+        if tts_model:
+            audio = tts_model.generate_audio(voice_state, text)
+            audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
+            rate = tts_model.sample_rate
+            if audio_np.dtype in (np.float32, np.float64):
+                audio_np = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+            elif audio_np.dtype != np.int16:
+                audio_np = audio_np.astype(np.int16)
+            return (rate, audio_np.tobytes())
+    except Exception as e:
+        print(f"[WARNING] Wyoming synthesis failed: {e}")
+    return None
 
-    # Create archive directory for original files
+
+def _scan_pocket_voices_dir(voices_dir: Path):
+    """Scan one directory for Pocket TTS voices (WAV); auto-convert MP3/OGG/FLAC. Returns list of voice dicts."""
+    out = []
+    if not voices_dir.exists():
+        return out
     archive_dir = voices_dir.parent / f"{voices_dir.name}-archive"
+    if PYDUB_AVAILABLE:
+        for ext in ["*.mp3", "*.ogg", "*.flac"]:
+            for voice_file in voices_dir.glob(ext):
+                try:
+                    print(f"[INFO] Auto-converting voice file: {voice_file.name}")
+                    convert_to_wav(
+                        str(voice_file),
+                        voices_dir=voices_dir,
+                        archive_dir=archive_dir,
+                    )
+                except Exception as e:
+                    print(f"[ERROR] Failed to convert {voice_file.name}: {e}")
+    for voice_file in voices_dir.glob("*.wav"):
+        voice_id = voice_file.stem.lower().replace(" ", "-").replace("_", "-")
+        out.append(
+            {
+                "voice_id": voice_id,
+                "name": voice_file.stem,
+                "file": str(voice_file),
+                "preview": f"/voices/{voice_id}/preview",
+                "type": "custom",
+                "engine": "pocket",
+            }
+        )
+        print(f"[INFO] Found voice (Pocket): {voice_id}")
+    return out
 
-    if voices_dir.exists():
-        # First, auto-convert any non-WAV files
-        if PYDUB_AVAILABLE:
-            for ext in ["*.mp3", "*.ogg", "*.flac"]:
-                for voice_file in voices_dir.glob(ext):
-                    try:
-                        print(f"[INFO] Auto-converting voice file: {voice_file.name}")
-                        converted_path = convert_to_wav(
-                            str(voice_file),
-                            voices_dir=voices_dir,
-                            archive_dir=archive_dir,
-                        )
-                        print(f"[INFO] Conversion complete: {converted_path}")
-                    except Exception as e:
-                        print(f"[ERROR] Failed to convert {voice_file.name}: {e}")
-        else:
-            print(
-                "[WARNING] pydub not available. Non-WAV voice files will not be converted."
-            )
 
-        # Now scan only WAV files
-        for voice_file in voices_dir.glob("*.wav"):
-            voice_id = voice_file.stem.lower().replace(" ", "-").replace("_", "-")
-            voices.append(
-                {
-                    "voice_id": voice_id,
-                    "name": voice_file.stem,
-                    "file": str(voice_file),
-                    "preview": f"/voices/{voice_id}/preview",
-                    "type": "custom",
-                    "engine": "pocket",
-                }
-            )
-            print(f"[INFO] Found voice (Pocket): {voice_id}")
+def scan_voices():
+    """Scan voice files: optional voices-celebrities, voices-pockettts (uploads), and Piper."""
+    voices = []
+    # Optional: pre-made / celebrity voices
+    voices_celebrities = Path(config["paths"].get("voices_dir", "voices-celebrities"))
+    voices.extend(_scan_pocket_voices_dir(voices_celebrities))
+    # User uploads (Pocket TTS); same voice_id overwrites celebrities
+    voices_pockettts = Path(
+        config["paths"].get("voices_pockettts_dir", "voices-pockettts")
+    )
+    voices.extend(_scan_pocket_voices_dir(voices_pockettts))
 
     # Scan Piper voices (optional); support .onnx in root and in subdirs (e.g. voices-piper/vits-piper-de_DE-thorsten-high/)
     if PIPER_AVAILABLE:
@@ -428,13 +472,107 @@ def convert_to_wav(
         raise Exception(f"Failed to convert audio: {e}")
 
 
+# ---------- Wyoming protocol (Home Assistant) ----------
+def _wyoming_encode_message(msg_type: str, data: dict, payload: bytes = b"") -> bytes:
+    """Encode one Wyoming protocol message: JSONL line + optional payload."""
+    data = dict(data) if data else {}
+    header_obj = {"type": msg_type, "data": data, "data_length": 0, "payload_length": len(payload)}
+    header = json.dumps(header_obj) + "\n"
+    return header.encode("utf-8") + payload
+
+
+async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    """Handle one Wyoming protocol client (describe + synthesize)."""
+    try:
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            try:
+                msg = json.loads(line.decode("utf-8").strip())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                break
+            msg_type = msg.get("type")
+            data = msg.get("data") or {}
+            payload_len = msg.get("payload_length", 0)
+            if payload_len > 0:
+                payload = await reader.readexactly(payload_len)
+            else:
+                payload = b""
+
+            if msg_type == "describe":
+                speakers = []
+                for vid, info in available_voices.items():
+                    if info.get("engine") in ("pocket", "piper"):
+                        speakers.append({
+                            "name": vid,
+                            "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
+                            "installed": True,
+                        })
+                info_msg = {
+                    "name": "Pocket TTS",
+                    "description": "Pocket TTS and Piper voices",
+                    "tts": [{"models": [{"name": "default", "languages": ["en"], "speakers": speakers or [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True}]}]}],
+                    "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
+                    "installed": True,
+                }
+                writer.write(_wyoming_encode_message("info", info_msg))
+                await writer.drain()
+            elif msg_type == "synthesize":
+                text = data.get("text", "").strip()
+                voice_name = (data.get("voice") or {}).get("name") or ""
+                if not text:
+                    continue
+                voice_id = voice_name if voice_name and voice_name in available_voices else None
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None, _synthesize_to_pcm_sync, text, voice_id
+                )
+                if result:
+                    rate, pcm = result
+                    writer.write(_wyoming_encode_message("audio-start", {"rate": rate, "width": 2, "channels": 1}))
+                    writer.write(_wyoming_encode_message("audio-chunk", {"rate": rate, "width": 2, "channels": 1}, pcm))
+                    writer.write(_wyoming_encode_message("audio-stop", {}))
+                await writer.drain()
+    except (ConnectionResetError, asyncio.IncompleteReadError):
+        pass
+    except Exception as e:
+        print(f"[WARNING] Wyoming client error: {e}")
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def _run_wyoming_server():
+    """Run Wyoming TCP server until cancelled."""
+    cfg = config.get("wyoming", {})
+    host = cfg.get("host", "0.0.0.0")
+    port = int(cfg.get("port", 10300))
+    server = await asyncio.start_server(_wyoming_handle_client, host, port)
+    print(f"[INFO] Wyoming protocol (Home Assistant) listening on {host}:{port}")
+    async with server:
+        await server.serve_forever()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler"""
     global available_voices
     available_voices = {v["voice_id"]: v for v in scan_voices()}
     print(f"[INFO] Found {len(available_voices)} voices (loaded on-demand)")
+    wyoming_task = None
+    if config.get("wyoming", {}).get("enabled"):
+        wyoming_task = asyncio.create_task(_run_wyoming_server())
     yield
+    if wyoming_task and not wyoming_task.done():
+        wyoming_task.cancel()
+        try:
+            await wyoming_task
+        except asyncio.CancelledError:
+            pass
     print("[INFO] Server shutting down...")
 
 
@@ -1069,9 +1207,11 @@ async def upload_voice(
                 detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}",
             )
 
-        # Create voices directory if not exists
-        voices_dir = Path(config["paths"]["voices_dir"])
-        voices_dir.mkdir(parents=True, exist_ok=True)
+        # User uploads go to voices-pockettts
+        upload_dir = Path(
+            config["paths"].get("voices_pockettts_dir", "voices-pockettts")
+        )
+        upload_dir.mkdir(parents=True, exist_ok=True)
 
         # Sanitize voice name
         safe_name = "".join(c for c in voice_name if c.isalnum() or c in "-_ ").strip()
@@ -1082,7 +1222,7 @@ async def upload_voice(
         voice_id = safe_name.lower().replace(" ", "-")
 
         # Always save as WAV for consistency
-        target_path = voices_dir / f"{voice_id}.wav"
+        target_path = upload_dir / f"{voice_id}.wav"
 
         # Check if file already exists
         if target_path.exists():
@@ -1142,6 +1282,7 @@ async def upload_voice(
             "file": str(target_path),
             "preview": f"/voices/{voice_id}/preview",
             "type": "custom",
+            "engine": "pocket",
         }
 
         return {
@@ -1175,6 +1316,11 @@ if __name__ == "__main__":
     host = config["server"]["host"]
     port = config["server"]["port"]
 
+    wyoming_cfg = config.get("wyoming", {})
+    wyoming_line = ""
+    if wyoming_cfg.get("enabled"):
+        wp = wyoming_cfg.get("port", 10300)
+        wyoming_line = f"\n║  Wyoming (HA):  tcp://{host}:{wp:<4}                  ║"
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                    Pocket TTS Server v2.3                    ║
@@ -1186,7 +1332,7 @@ if __name__ == "__main__":
 ║  OpenAI Endpoints:                                           ║
 ║    POST /v1/audio/speech        - Text to Speech            ║
 ║    GET  /v1/audio/voices        - List Voices               ║
-║    POST /v1/chat/completions    - Voice Chat with LLM       ║
+║    POST /v1/chat/completions    - Voice Chat with LLM       ║{wyoming_line}
 ╠══════════════════════════════════════════════════════════════╣
 ║  TTS Available: {"Yes" if tts_model else "No - Install: pip install pocket-tts":<42}║
 ║  Voices Loaded: {len(available_voices):<42}║

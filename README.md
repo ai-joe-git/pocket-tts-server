@@ -73,6 +73,7 @@ Double-click **`run_pocket_tts.bat`**
 - 180-second timeout for slow LLMs
 - CPU optimized (GPU optional); **Intel Arc** via XPU supported — see [INTEL_ARC.md](INTEL_ARC.md)
 - **Piper** voice models supported (optional) — see [PIPER.md](PIPER.md)
+- **Wyoming** protocol for [Home Assistant](https://www.home-assistant.io/integrations/wyoming/) — see [WYOMING.md](WYOMING.md)
 - 76+ voices included (celebrities, characters, custom)
 
 ---
@@ -101,6 +102,17 @@ python pocket_tts_api.py
 - 4GB+ RAM
 - Audio: WAV, MP3, OGG, FLAC supported
 
+### Hugging Face access (Pocket TTS model)
+
+The Pocket TTS model is hosted on Hugging Face. You must **accept the model terms** and **log in** before the first run so the server can download the model.
+
+1. **Authorize the model:** Open [https://huggingface.co/kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts), sign in or create an account, and accept the conditions to access the repository.
+2. **Log in from the command line:**  
+   - Install [uv](https://docs.astral.sh/uv/) if you don’t have it (e.g. `pip install uv` or see [uv installation](https://docs.astral.sh/uv/getting-started/installation/)).  
+   - Run:  
+     `uvx hf auth login`  
+   - Follow the prompts to authenticate. After that, the Pocket TTS server can download the model on first start.
+
 ---
 
 ## 🎤 Setting Up Voices
@@ -113,10 +125,10 @@ python pocket_tts_api.py
 5. Done! Ready in seconds
 
 ### Method 2: Manual Copy
-1. Copy audio files to `voices-celebrities/`
-2. Restart server
-3. Files auto-convert to WAV format
-4. Originals archived automatically
+- **Your own voices:** Copy audio files to `voices-pockettts/` (same folder used for web uploads).
+- **Optional pre-made pack:** Copy to `voices-celebrities/` if you use that folder.
+2. Restart server (or new files are picked up on next scan).
+3. Files auto-convert to WAV; originals archived to `*-archive/` folders.
 
 **Voice Quality Tips:**
 - ✅ **Best length:** 15-20 seconds
@@ -221,6 +233,15 @@ Edit `config.json` or use Settings page:
     "host": "localhost",
     "port": 8000
   },
+  "paths": {
+    "voices_dir": "voices-celebrities",
+    "voices_pockettts_dir": "voices-pockettts"
+  },
+  "wyoming": {
+    "enabled": false,
+    "host": "0.0.0.0",
+    "port": 10300
+  },
   "tts": {
     "device": "cpu"
   },
@@ -267,8 +288,9 @@ pocket-tts-server/
 ├── pocket_tts_api.py           # Main server (FastAPI)
 ├── templates/
 │   └── index.html              # Web interface
-├── voices-celebrities/         # Active voices (WAV)
-├── voices-celebrities-archive/ # Original MP3/OGG files
+├── voices-pockettts/          # User uploads (Pocket TTS WAV)
+├── voices-celebrities/        # Optional pre-made voices (WAV)
+├── voices-*-archive/          # Archived originals after conversion
 ├── config.json                 # Settings
 ├── requirements.txt            # Python dependencies
 ├── install_pocket_tts.bat      # Windows installer

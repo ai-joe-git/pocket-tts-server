@@ -19,6 +19,7 @@ output/
 temp/
 logs/
 voices-celebrities-archive/
+voices-pockettts-archive/
 voices-celebrities/*.txt
 
 # Environment / secrets
