@@ -475,11 +475,12 @@ def convert_to_wav(
 
 # ---------- Wyoming protocol (Home Assistant) ----------
 def _wyoming_encode_message(msg_type: str, data: dict, payload: bytes = b"") -> bytes:
-    """Encode one Wyoming protocol message: JSONL line + optional payload."""
+    """Encode one Wyoming protocol message. Matches Wyoming package: line has data_length (optional data bytes), then payload."""
     data = dict(data) if data else {}
-    header_obj = {"type": msg_type, "data": data, "data_length": 0, "payload_length": len(payload)}
+    data_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    header_obj = {"type": msg_type, "data_length": len(data_bytes), "payload_length": len(payload)}
     header = json.dumps(header_obj) + "\n"
-    return header.encode("utf-8") + payload
+    return header.encode("utf-8") + data_bytes + payload
 
 
 async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -498,8 +499,16 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                 print(f"[WARNING] Wyoming: invalid message: {e}")
                 break
             msg_type = msg.get("type", "")
-            data = msg.get("data") or {}
+            data_len = msg.get("data_length", 0)
             payload_len = msg.get("payload_length", 0)
+            if data_len > 0:
+                data_bytes = await reader.readexactly(data_len)
+                try:
+                    data = json.loads(data_bytes.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    data = {}
+            else:
+                data = msg.get("data") or {}
             print(f"[INFO] Wyoming: received message type={msg_type!r}")
             if payload_len > 0:
                 try:
@@ -557,21 +566,31 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                 text = data.get("text", "").strip()
                 voice_name = (data.get("voice") or {}).get("name") or ""
                 if not text:
+                    print("[WARNING] Wyoming: synthesize with empty text, skipping")
                     continue
                 voice_id = voice_name if voice_name and voice_name in available_voices else None
-                loop = asyncio.get_event_loop()
-                t0 = time.monotonic()
-                result = await loop.run_in_executor(
-                    None, _synthesize_to_pcm_sync, text, voice_id
-                )
-                elapsed = time.monotonic() - t0
-                print(f"[INFO] Wyoming: synthesis took {elapsed:.1f}s")
-                if result:
-                    rate, pcm = result
-                    writer.write(_wyoming_encode_message("audio-start", {"rate": rate, "width": 2, "channels": 1}))
-                    writer.write(_wyoming_encode_message("audio-chunk", {"rate": rate, "width": 2, "channels": 1}, pcm))
-                    writer.write(_wyoming_encode_message("audio-stop", {}))
-                await writer.drain()
+                print(f"[INFO] Wyoming: synthesizing text={text[:50]!r}..., voice={voice_id or 'default'}")
+                try:
+                    loop = asyncio.get_event_loop()
+                    t0 = time.monotonic()
+                    result = await loop.run_in_executor(
+                        None, _synthesize_to_pcm_sync, text, voice_id
+                    )
+                    elapsed = time.monotonic() - t0
+                    print(f"[INFO] Wyoming: synthesis took {elapsed:.1f}s, result={'ok' if result else 'None'}")
+                    if result:
+                        rate, pcm = result
+                        writer.write(_wyoming_encode_message("audio-start", {"rate": rate, "width": 2, "channels": 1}))
+                        writer.write(_wyoming_encode_message("audio-chunk", {"rate": rate, "width": 2, "channels": 1}, pcm))
+                        writer.write(_wyoming_encode_message("audio-stop", {}))
+                        await writer.drain()
+                        print(f"[INFO] Wyoming: audio sent ({len(pcm)} bytes PCM)")
+                    else:
+                        print("[WARNING] Wyoming: synthesis returned None, no audio sent")
+                except Exception as e:
+                    print(f"[WARNING] Wyoming: synthesize error: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 if msg_type:
                     print(f"[INFO] Wyoming: unhandled message type={msg_type!r}")
