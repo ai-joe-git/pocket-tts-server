@@ -483,6 +483,8 @@ def _wyoming_encode_message(msg_type: str, data: dict, payload: bytes = b"") -> 
 
 async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     """Handle one Wyoming protocol client (describe + synthesize)."""
+    peer = writer.get_extra_info("peername", ("?", "?"))
+    print(f"[INFO] Wyoming: client connected from {peer[0]}:{peer[1]}")
     try:
         while True:
             line = await reader.readline()
@@ -490,17 +492,22 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                 break
             try:
                 msg = json.loads(line.decode("utf-8").strip())
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                print(f"[WARNING] Wyoming: invalid message: {e}")
                 break
             msg_type = msg.get("type")
             data = msg.get("data") or {}
             payload_len = msg.get("payload_length", 0)
             if payload_len > 0:
-                payload = await reader.readexactly(payload_len)
+                try:
+                    payload = await reader.readexactly(payload_len)
+                except asyncio.IncompleteReadError:
+                    break
             else:
                 payload = b""
 
             if msg_type == "describe":
+                print("[INFO] Wyoming: describe received")
                 speakers = []
                 for vid, info in available_voices.items():
                     if info.get("engine") in ("pocket", "piper"):
@@ -509,15 +516,33 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                             "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
                             "installed": True,
                         })
+                if not speakers:
+                    speakers = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True}]
+                # Match structure expected by Home Assistant: one TTS service with name, one model, speakers list
                 info_msg = {
                     "name": "Pocket TTS",
                     "description": "Pocket TTS and Piper voices",
-                    "tts": [{"models": [{"name": "default", "languages": ["en"], "speakers": speakers or [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True}]}]}],
+                    "tts": [{
+                        "name": "pocket-tts",
+                        "models": [{
+                            "name": "pocket-tts",
+                            "languages": ["en"],
+                            "speakers": speakers,
+                            "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
+                            "installed": True,
+                        }],
+                    }],
                     "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
                     "installed": True,
                 }
-                writer.write(_wyoming_encode_message("info", info_msg))
-                await writer.drain()
+                try:
+                    writer.write(_wyoming_encode_message("info", info_msg))
+                    await writer.drain()
+                    print("[INFO] Wyoming: describe -> info sent")
+                except Exception as e:
+                    print(f"[WARNING] Wyoming: failed to send info: {e}")
+                    import traceback
+                    traceback.print_exc()
             elif msg_type == "synthesize":
                 text = data.get("text", "").strip()
                 voice_name = (data.get("voice") or {}).get("name") or ""
@@ -538,6 +563,8 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
         pass
     except Exception as e:
         print(f"[WARNING] Wyoming client error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         try:
             writer.close()

@@ -43,6 +43,23 @@ Home Assistant will connect over TCP and use the Wyoming protocol to list voices
 - **Voices:** All voices from `voices-pockettts/`, `voices-celebrities/`, and `voices-piper/` are advertised. The client can request a voice by name; if none is given, the first available voice is used.
 - No extra Python packages are required; the protocol is implemented directly.
 
+## Troubleshooting
+
+**"Unknown error occurred" in Home Assistant**
+
+1. **Check the server console** – With Wyoming enabled, you should see:
+   - `[INFO] Wyoming protocol (Home Assistant) listening on 0.0.0.0:10300`
+   - When HA connects: `Wyoming: client connected from <IP>:<port>` and `Wyoming: describe received` / `describe -> info sent`
+   - If you never see "client connected", HA cannot reach the server (firewall, wrong host/port, or server not listening on the right interface).
+
+2. **Reachability** – Home Assistant must be able to open a **TCP** connection to the machine running this server on the Wyoming port (default 10300). If HA is on another machine:
+   - Use the server’s LAN IP (e.g. `192.168.1.10`), not `localhost`.
+   - Ensure no firewall blocks incoming TCP on the Wyoming port (Windows Firewall, router, etc.).
+
+3. **Port** – In the Wyoming integration, use the **same port** as in `config.json` (`wyoming.port`). If you changed it (e.g. to 10301), enter that port in HA.
+
+4. **Restart** – Restart this server after changing `config.json`, then in HA remove and re-add the Wyoming server if the problem persists.
+
 ## References
 
 - [Wyoming protocol](https://github.com/rhasspy/wyoming) (Rhasspy/OHF)
