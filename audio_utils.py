@@ -1,6 +1,4 @@
 # Audio Conversion Helper
-import io
-import os
 import tempfile
 from pathlib import Path
 
@@ -10,9 +8,7 @@ try:
     PYDUB_AVAILABLE = True
 except ImportError:
     PYDUB_AVAILABLE = False
-    print(
-        "[WARNING] pydub not installed. MP3/OGG files won't be converted automatically."
-    )
+    print("[WARNING] pydub not installed. MP3/OGG files won't be converted automatically.")
     print("[INFO] Install with: pip install pydub")
 
 

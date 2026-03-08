@@ -5,8 +5,6 @@ Shows how to use the OpenAI-compatible API
 """
 
 import requests
-import json
-from pathlib import Path
 
 BASE_URL = "http://localhost:8000"
 
@@ -19,9 +17,7 @@ def list_voices():
         print("\nAvailable Voices:")
         print("-" * 50)
         for voice in voices.get("voices", []):
-            print(
-                f"  ID: {voice['voice_id']:<20} Name: {voice['name']:<20} Type: {voice['type']}"
-            )
+            print(f"  ID: {voice['voice_id']:<20} Name: {voice['name']:<20} Type: {voice['type']}")
         return voices.get("voices", [])
     else:
         print(f"Error: {response.status_code}")
@@ -98,7 +94,7 @@ def main():
         response = requests.get(f"{BASE_URL}/health")
         if response.status_code == 200:
             health = response.json()
-            print(f"\n✓ Server is running")
+            print("\n✓ Server is running")
             print(f"  Status: {health.get('status')}")
             print(f"  Voices loaded: {health.get('voices_loaded')}")
             print(f"  TTS Available: {health.get('tts_available')}")

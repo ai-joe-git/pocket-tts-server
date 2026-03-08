@@ -4,29 +4,27 @@ Pocket TTS - Enhanced API Server with OpenAI Compatibility
 Provides TTS endpoints and voice chat functionality with LLM integration
 """
 
-import os
-import sys
-import json
-import base64
 import asyncio
-import requests
-from pathlib import Path
-from typing import Optional, List, Dict, Any
-from datetime import datetime
-from contextlib import asynccontextmanager
+import base64
+import io
+import json
+import os
 import tempfile
 import time
-import io
-import subprocess
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+import numpy as np
+import requests
+import scipy.io.wavfile
+import uvicorn
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-import uvicorn
-import scipy.io.wavfile
-import numpy as np
 
 # Try to import audio conversion
 try:
@@ -40,7 +38,6 @@ except ImportError:
 # Try to import pocket_tts
 try:
     from pocket_tts import TTSModel
-    from pocket_tts import export_model_state
 
     POCKET_TTS_AVAILABLE = True
     print("[INFO] pocket_tts imported successfully")
@@ -101,7 +98,7 @@ def load_config():
 
     if config_path.exists():
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 loaded_config = json.load(f)
                 # Merge with defaults
                 for key, value in default_config.items():
@@ -132,12 +129,14 @@ config = load_config()
 tts_model = None
 voice_states = {}  # Cache voice states
 
+
 def _resolve_tts_device():
     """Resolve TTS device from config; fall back to cpu if xpu/cuda unavailable."""
     device = config.get("tts", {}).get("device", "cpu").strip().lower()
     if device == "xpu":
         try:
             import torch
+
             if getattr(torch, "xpu", None) and torch.xpu.is_available():
                 return "xpu"
         except Exception:
@@ -147,6 +146,7 @@ def _resolve_tts_device():
     if device == "cuda":
         try:
             import torch
+
             if torch.cuda.is_available():
                 return "cuda"
         except Exception:
@@ -246,6 +246,7 @@ def _edgetts_synthesize_to_wav_bytes(voice_id: str, text: str):
     except Exception as e:
         print(f"[WARNING] Edge TTS synthesis failed: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -344,9 +345,7 @@ def scan_voices():
     voices_celebrities = Path(config["paths"].get("voices_dir", "voices-celebrities"))
     voices.extend(_scan_pocket_voices_dir(voices_celebrities))
     # User uploads (Pocket TTS); same voice_id overwrites celebrities
-    voices_pockettts = Path(
-        config["paths"].get("voices_pockettts_dir", "voices-pockettts")
-    )
+    voices_pockettts = Path(config["paths"].get("voices_pockettts_dir", "voices-pockettts"))
     voices.extend(_scan_pocket_voices_dir(voices_pockettts))
 
     # Scan Piper voices (optional); support .onnx in root and in subdirs (e.g. voices-piper/vits-piper-de_DE-thorsten-high/)
@@ -415,9 +414,7 @@ def get_voice_state(voice_id):
     return None
 
 
-def convert_to_wav(
-    audio_path, voices_dir=None, archive_dir=None, max_duration_ms=20000
-):
+def convert_to_wav(audio_path, voices_dir=None, archive_dir=None, max_duration_ms=20000):
     """
     Convert audio file to WAV format (24kHz mono) if needed.
     If voices_dir and archive_dir are provided, will archive the original MP3
@@ -429,8 +426,8 @@ def convert_to_wav(
         archive_dir: Directory to archive original files
         max_duration_ms: Maximum duration in milliseconds (default 20 seconds)
     """
-    import tempfile
     import shutil
+    import tempfile
     from pathlib import Path
 
     audio_path = Path(audio_path)
@@ -453,9 +450,7 @@ def convert_to_wav(
                         archive_dir = Path(archive_dir)
                         archive_dir.mkdir(parents=True, exist_ok=True)
                         # Archive original long file
-                        archive_path = archive_dir / (
-                            audio_path.stem + "_original_long.wav"
-                        )
+                        archive_path = archive_dir / (audio_path.stem + "_original_long.wav")
                         shutil.copy2(str(audio_path), str(archive_path))
                         print(f"[INFO] Archived original long WAV to: {archive_path}")
 
@@ -467,9 +462,7 @@ def convert_to_wav(
         return str(audio_path)
 
     if not PYDUB_AVAILABLE:
-        raise ImportError(
-            "pydub is required for audio conversion. Install: pip install pydub"
-        )
+        raise ImportError("pydub is required for audio conversion. Install: pip install pydub")
 
     # Create temp WAV file
     temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -492,7 +485,7 @@ def convert_to_wav(
         # Convert to mono
         if audio.channels > 1:
             audio = audio.set_channels(1)
-            print(f"[INFO] Converted to mono")
+            print("[INFO] Converted to mono")
 
         # Set sample rate to 24kHz (required by pocket_tts)
         audio = audio.set_frame_rate(24000)
@@ -500,7 +493,7 @@ def convert_to_wav(
 
         # Export as WAV
         audio.export(temp_wav.name, format="wav")
-        print(f"[INFO] Converted to 24kHz WAV format")
+        print("[INFO] Converted to 24kHz WAV format")
 
         # If voices_dir and archive_dir provided, archive original and move WAV
         if voices_dir and archive_dir:
@@ -535,13 +528,7 @@ def convert_to_wav(
 
 
 # ---------- Wyoming protocol (Home Assistant) ----------
-def _wyoming_encode_message(msg_type: str, data: dict, payload: bytes = b"") -> bytes:
-    """Encode one Wyoming protocol message. Matches Wyoming package: line has data_length (optional data bytes), then payload."""
-    data = dict(data) if data else {}
-    data_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    header_obj = {"type": msg_type, "data_length": len(data_bytes), "payload_length": len(payload)}
-    header = json.dumps(header_obj) + "\n"
-    return header.encode("utf-8") + data_bytes + payload
+from wyoming_protocol import encode_message as _wyoming_encode_message
 
 
 async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -578,10 +565,11 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                     print("[WARNING] Wyoming: incomplete payload read")
                     break
             else:
-                payload = b""
+                payload = b""  # noqa: F841
 
             if msg_type == "describe":
                 print("[INFO] Wyoming: describe received")
+
                 # Wyoming/HA expect TtsProgram with "voices". Per-voice languages so HA shows only matching voices (e.g. German -> Piper de_DE).
                 def _wyoming_voice_languages(voice_id: str, engine: str, vinfo: dict) -> list:
                     if engine == "pocket":
@@ -604,25 +592,48 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                 voices = []
                 for vid, vinfo in available_voices.items():
                     if vinfo.get("engine") in ("pocket", "piper", "edgetts"):
-                        voices.append({
-                            "name": vid,
-                            "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
-                            "installed": True,
-                            "languages": _wyoming_voice_languages(vid, vinfo.get("engine", "pocket"), vinfo),
-                            "description": vinfo.get("name", vid),
-                        })
+                        voices.append(
+                            {
+                                "name": vid,
+                                "attribution": {
+                                    "name": "Pocket TTS Server",
+                                    "url": "https://github.com/ai-joe-git/pocket-tts-server",
+                                },
+                                "installed": True,
+                                "languages": _wyoming_voice_languages(
+                                    vid, vinfo.get("engine", "pocket"), vinfo
+                                ),
+                                "description": vinfo.get("name", vid),
+                            }
+                        )
                 if not voices:
-                    voices = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True, "languages": ["en", "de"], "description": "Default"}]
+                    voices = [
+                        {
+                            "name": "default",
+                            "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"},
+                            "installed": True,
+                            "languages": ["en", "de"],
+                            "description": "Default",
+                        }
+                    ]
                 info_msg = {
                     "name": "Pocket TTS",
                     "description": "Pocket TTS, Piper, and Edge TTS voices",
-                    "tts": [{
-                        "name": "Pocket TTS",
-                        "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
-                        "installed": True,
-                        "voices": voices,
-                    }],
-                    "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
+                    "tts": [
+                        {
+                            "name": "Pocket TTS",
+                            "attribution": {
+                                "name": "Pocket TTS Server",
+                                "url": "https://github.com/ai-joe-git/pocket-tts-server",
+                            },
+                            "installed": True,
+                            "voices": voices,
+                        }
+                    ],
+                    "attribution": {
+                        "name": "Pocket TTS Server",
+                        "url": "https://github.com/ai-joe-git/pocket-tts-server",
+                    },
                     "installed": True,
                 }
                 try:
@@ -632,13 +643,16 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                     # Pre-load first voice so first TTS request is faster (avoids HA timeout)
                     if voices:
                         first_id = voices[0]["name"]
-                        async def _warmup():
+
+                        async def _warmup(voice_id=first_id):
                             loop = asyncio.get_event_loop()
-                            await loop.run_in_executor(None, lambda: get_voice_state(first_id))
+                            await loop.run_in_executor(None, lambda v=voice_id: get_voice_state(v))
+
                         asyncio.create_task(_warmup())
                 except Exception as e:
                     print(f"[WARNING] Wyoming: failed to send info: {e}")
                     import traceback
+
                     traceback.print_exc()
             elif msg_type == "synthesize":
                 text = data.get("text", "").strip()
@@ -647,7 +661,9 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                     print("[WARNING] Wyoming: synthesize with empty text, skipping")
                     continue
                 voice_id = voice_name if voice_name and voice_name in available_voices else None
-                print(f"[INFO] Wyoming: synthesizing text={text[:50]!r}..., voice={voice_id or 'default'}")
+                print(
+                    f"[INFO] Wyoming: synthesizing text={text[:50]!r}..., voice={voice_id or 'default'}"
+                )
                 try:
                     loop = asyncio.get_event_loop()
                     t0 = time.monotonic()
@@ -655,11 +671,21 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                         None, _synthesize_to_pcm_sync, text, voice_id
                     )
                     elapsed = time.monotonic() - t0
-                    print(f"[INFO] Wyoming: synthesis took {elapsed:.1f}s, result={'ok' if result else 'None'}")
+                    print(
+                        f"[INFO] Wyoming: synthesis took {elapsed:.1f}s, result={'ok' if result else 'None'}"
+                    )
                     if result:
                         rate, pcm = result
-                        writer.write(_wyoming_encode_message("audio-start", {"rate": rate, "width": 2, "channels": 1}))
-                        writer.write(_wyoming_encode_message("audio-chunk", {"rate": rate, "width": 2, "channels": 1}, pcm))
+                        writer.write(
+                            _wyoming_encode_message(
+                                "audio-start", {"rate": rate, "width": 2, "channels": 1}
+                            )
+                        )
+                        writer.write(
+                            _wyoming_encode_message(
+                                "audio-chunk", {"rate": rate, "width": 2, "channels": 1}, pcm
+                            )
+                        )
                         writer.write(_wyoming_encode_message("audio-stop", {}))
                         await writer.drain()
                         print(f"[INFO] Wyoming: audio sent ({len(pcm)} bytes PCM)")
@@ -668,6 +694,7 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                 except Exception as e:
                     print(f"[WARNING] Wyoming: synthesize error: {e}")
                     import traceback
+
                     traceback.print_exc()
             else:
                 if msg_type:
@@ -677,6 +704,7 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
     except Exception as e:
         print(f"[WARNING] Wyoming client error: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         try:
@@ -699,7 +727,11 @@ async def _run_wyoming_server():
 
 async def _load_edge_tts_voices():
     """Fetch Edge TTS voice list and return list of voice dicts."""
-    if not EDGE_TTS_AVAILABLE or not edge_tts or not config.get("tts", {}).get("edge_tts_enabled", False):
+    if (
+        not EDGE_TTS_AVAILABLE
+        or not edge_tts
+        or not config.get("tts", {}).get("edge_tts_enabled", False)
+    ):
         return []
     try:
         voices_raw = await edge_tts.list_voices()
@@ -710,19 +742,22 @@ async def _load_edge_tts_voices():
                 continue
             name = v.get("Name") or short
             locale = (v.get("Locale") or "").strip()
-            out.append({
-                "voice_id": short,
-                "name": name,
-                "preview": "",
-                "type": "edgetts",
-                "engine": "edgetts",
-                "locale": locale,
-            })
+            out.append(
+                {
+                    "voice_id": short,
+                    "name": name,
+                    "preview": "",
+                    "type": "edgetts",
+                    "engine": "edgetts",
+                    "locale": locale,
+                }
+            )
             print(f"[INFO] Found voice (Edge TTS): {short}")
         return out
     except Exception as e:
         print(f"[WARNING] Edge TTS list_voices failed: {e}")
         import traceback
+
         traceback.print_exc()
         return []
 
@@ -799,25 +834,17 @@ async def create_speech(request: OpenAITTSRequest):
             if "default" in voice_states:
                 voice_state = voice_states["default"]
             else:
-                raise HTTPException(
-                    status_code=400, detail=f"Voice '{request.voice}' not found"
-                )
+                raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' not found")
 
         # Piper path
         if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
-            audio_data = _piper_synthesize_to_wav_bytes(
-                voice_state["voice_id"], request.input
-            )
+            audio_data = _piper_synthesize_to_wav_bytes(voice_state["voice_id"], request.input)
             if not audio_data:
-                raise HTTPException(
-                    status_code=500, detail="Piper TTS generation failed"
-                )
+                raise HTTPException(status_code=500, detail="Piper TTS generation failed")
         elif isinstance(voice_state, dict) and voice_state.get("engine") == "edgetts":
             audio_data = _edgetts_synthesize_to_wav_bytes(voice_state["voice_id"], request.input)
             if not audio_data:
-                raise HTTPException(
-                    status_code=500, detail="Edge TTS generation failed"
-                )
+                raise HTTPException(status_code=500, detail="Edge TTS generation failed")
         else:
             # Pocket path
             if not tts_model:
@@ -918,9 +945,7 @@ def call_llm(messages: List[Dict[str, str]], stream: bool = False) -> Dict[str, 
         api_url = llm_config.get("api_url", "http://localhost:8080/v1/chat/completions")
         api_key = llm_config.get("api_key", "")
         model = llm_config.get("model", "llama-3")
-        system_prompt = llm_config.get(
-            "system_prompt", "You are a helpful AI assistant."
-        )
+        system_prompt = llm_config.get("system_prompt", "You are a helpful AI assistant.")
 
         # Prepare messages with system prompt
         full_messages = [{"role": "system", "content": system_prompt}] + messages
@@ -1011,9 +1036,7 @@ async def stream_llm_tokens(messages: List[Dict[str, str]]):
         api_url = llm_config.get("api_url", "http://localhost:8080/v1/chat/completions")
         api_key = llm_config.get("api_key", "")
         model = llm_config.get("model", "llama-3")
-        system_prompt = llm_config.get(
-            "system_prompt", "You are a helpful AI assistant."
-        )
+        system_prompt = llm_config.get("system_prompt", "You are a helpful AI assistant.")
 
         # Prepare messages with system prompt
         full_messages = [{"role": "system", "content": system_prompt}] + messages
@@ -1033,9 +1056,7 @@ async def stream_llm_tokens(messages: List[Dict[str, str]]):
         print(f"[INFO] Starting LLM stream at {api_url}")
 
         # Use stream=True to get response as it comes
-        response = requests.post(
-            api_url, json=payload, headers=headers, stream=True, timeout=180
-        )
+        response = requests.post(api_url, json=payload, headers=headers, stream=True, timeout=180)
         response.raise_for_status()
 
         # Process SSE stream from LLM
@@ -1098,9 +1119,7 @@ def generate_sentence_audio_sync(voice_state, sentence):
     try:
         # Piper path
         if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
-            audio_bytes = _piper_synthesize_to_wav_bytes(
-                voice_state["voice_id"], sentence
-            )
+            audio_bytes = _piper_synthesize_to_wav_bytes(voice_state["voice_id"], sentence)
             if audio_bytes:
                 return base64.b64encode(audio_bytes).decode()
             return None
@@ -1144,9 +1163,7 @@ async def stream_chat_response(request: VoiceChatRequest):
         sentence_buffer = ""
         sentence_idx = 0
         accumulated_text = ""
-        pending_audio_tasks = []  # (idx, sentence, task)
-
-        print(f"[INFO] Starting LLM stream...")
+        print("[INFO] Starting LLM stream...")
 
         # Stream tokens from LLM as they arrive
         async for token in stream_llm_tokens(request.messages):
@@ -1168,9 +1185,7 @@ async def stream_chat_response(request: VoiceChatRequest):
                 for sentence in sentences:
                     sentence = sentence.strip()
                     if len(sentence) > 5:  # Valid sentence
-                        print(
-                            f"[INFO] Sentence {sentence_idx} complete: '{sentence[:40]}...'"
-                        )
+                        print(f"[INFO] Sentence {sentence_idx} complete: '{sentence[:40]}...'")
 
                         # Generate TTS NOW (blocking is OK here - we want audio ASAP)
                         try:
@@ -1183,9 +1198,7 @@ async def stream_chat_response(request: VoiceChatRequest):
                             )
 
                             if audio_data:
-                                print(
-                                    f"[INFO] Streaming audio for sentence {sentence_idx}"
-                                )
+                                print(f"[INFO] Streaming audio for sentence {sentence_idx}")
                                 yield f"data: {json.dumps({'type': 'audio', 'data': audio_data, 'format': 'wav', 'chunk': sentence_idx})}\n\n"
 
                             sentence_idx += 1
@@ -1213,7 +1226,7 @@ async def stream_chat_response(request: VoiceChatRequest):
             except Exception as e:
                 print(f"[ERROR] Final TTS failed: {e}")
 
-        print(f"[INFO] Streaming complete, sending done signal")
+        print("[INFO] Streaming complete, sending done signal")
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     except Exception as e:
@@ -1266,7 +1279,9 @@ async def chat_completions(request: VoiceChatRequest):
                     if audio_bytes:
                         audio_data = base64.b64encode(audio_bytes).decode()
                 elif isinstance(voice_state, dict) and voice_state.get("engine") == "edgetts":
-                    audio_bytes = _edgetts_synthesize_to_wav_bytes(voice_state["voice_id"], response_text)
+                    audio_bytes = _edgetts_synthesize_to_wav_bytes(
+                        voice_state["voice_id"], response_text
+                    )
                     if audio_bytes:
                         audio_data = base64.b64encode(audio_bytes).decode()
                 else:
@@ -1274,9 +1289,7 @@ async def chat_completions(request: VoiceChatRequest):
                         audio = tts_model.generate_audio(voice_state, response_text)
                         audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
                         wav_buffer = io.BytesIO()
-                        scipy.io.wavfile.write(
-                            wav_buffer, tts_model.sample_rate, audio_np
-                        )
+                        scipy.io.wavfile.write(wav_buffer, tts_model.sample_rate, audio_np)
                         wav_buffer.seek(0)
                         audio_bytes = wav_buffer.read()
                         audio_data = base64.b64encode(audio_bytes).decode()
@@ -1315,9 +1328,7 @@ async def get_config():
     safe_config = config.copy()
     if "llm" in safe_config:
         safe_config["llm"] = safe_config["llm"].copy()
-        safe_config["llm"]["api_key"] = (
-            "***" if safe_config["llm"].get("api_key") else ""
-        )
+        safe_config["llm"]["api_key"] = "***" if safe_config["llm"].get("api_key") else ""
     return safe_config
 
 
@@ -1344,7 +1355,7 @@ async def root():
     """Serve the main web interface"""
     html_path = Path("templates/index.html")
     if html_path.exists():
-        with open(html_path, "r", encoding="utf-8") as f:
+        with open(html_path, encoding="utf-8") as f:
             return f.read()
     else:
         return HTMLResponse(
@@ -1403,9 +1414,7 @@ async def upload_voice(
             )
 
         # User uploads go to voices-pockettts
-        upload_dir = Path(
-            config["paths"].get("voices_pockettts_dir", "voices-pockettts")
-        )
+        upload_dir = Path(config["paths"].get("voices_pockettts_dir", "voices-pockettts"))
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         # Sanitize voice name
@@ -1421,9 +1430,7 @@ async def upload_voice(
 
         # Check if file already exists
         if target_path.exists():
-            raise HTTPException(
-                status_code=400, detail=f"Voice '{safe_name}' already exists"
-            )
+            raise HTTPException(status_code=400, detail=f"Voice '{safe_name}' already exists")
 
         # Read uploaded content
         content = await file.read()

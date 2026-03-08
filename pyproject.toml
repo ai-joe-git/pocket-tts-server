@@ -1,0 +1,51 @@
+[project]
+name = "pocket-tts-server"
+version = "2.3.0"
+description = "OpenAI-compatible TTS API with voice cloning, Piper, Edge TTS, Wyoming"
+readme = "README.md"
+requires-python = ">=3.8"
+
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E722",   # bare except (used in cleanup paths)
+    "B904",   # raise from (optional; can add later)
+    "SIM105", # contextlib.suppress (style)
+    "SIM108", # ternary (readability)
+    "SIM115", # context manager for temp files (delete=False pattern)
+    "B008",   # FastAPI File() in defaults is idiomatic
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]

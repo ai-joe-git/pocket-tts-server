@@ -1,6 +1,6 @@
-# Edge TTS (Microsoft, kostenlos)
+# Edge TTS (Microsoft, free)
 
-[Edge TTS](https://github.com/rany2/edge-tts) nutzt die **kostenlose** Microsoft-Text-to-Speech-API (wie die „Vorlesen“-Funktion im Edge-Browser). Kein Azure-Konto nötig. Über **70 Sprachen** und **300+ Stimmen**.
+[Edge TTS](https://github.com/rany2/edge-tts) uses Microsoft’s **free** text-to-speech API (the same as the “Read aloud” feature in the Edge browser). No Azure account required. **70+ languages** and **300+ voices**.
 
 ## Installation
 
@@ -8,13 +8,13 @@
 pip install edge-tts
 ```
 
-Für WAV-Ausgabe wird außerdem **pydub** benötigt (für MP3→WAV), das in der Regel schon für Pocket TTS installiert ist:
+For WAV output, **pydub** is also required (for MP3→WAV conversion); it is usually already installed for Pocket TTS:
 
 ```bash
 pip install pydub
 ```
 
-## Aktivierung
+## Enable Edge TTS
 
 In **`config.json`**:
 
@@ -26,28 +26,28 @@ In **`config.json`**:
 }
 ```
 
-Server neu starten. Beim Start werden alle verfügbaren Edge-Stimmen abgefragt und erscheinen in der Stimmenliste (z. B. `de-DE-KatjaNeural`, `en-US-AriaNeural`).
+Restart the server. On startup, all available Edge voices are fetched and appear in the voice list (e.g. `de-DE-KatjaNeural`, `en-US-AriaNeural`).
 
-## Stimmen
+## Voices
 
-- Die **Voice-ID** entspricht dem Microsoft ShortName, z. B. `de-DE-KatjaNeural`, `en-US-GuyNeural`.
-- Alle Stimmen erscheinen unter `/v1/audio/voices`, im Voice Chat und in **Wyoming** (Home Assistant).
-- Für Wyoming wird die Sprache aus dem Locale abgeleitet (z. B. `de-DE` → Deutsch), sodass bei HA-Sprache „Deutsch“ die passenden Edge-Stimmen angeboten werden.
+- **Voice ID** matches the Microsoft ShortName, e.g. `de-DE-KatjaNeural`, `en-US-GuyNeural`.
+- All voices appear in `/v1/audio/voices`, Voice Chat, and **Wyoming** (Home Assistant).
+- For Wyoming, language is derived from the voice locale (e.g. `de-DE` → German), so when HA language is set to German, the matching Edge voices are offered.
 
-## Nutzung
+## Usage
 
-- **API:** `POST /v1/audio/speech` mit `"voice": "de-DE-KatjaNeural"` (oder einer anderen Edge-Voice-ID).
-- **Wyoming/Home Assistant:** Edge TTS erscheint zusammen mit Pocket- und Piper-Stimmen; Sprache wird automatisch zugeordnet.
-- **Voice Chat:** Edge-Stimmen können wie alle anderen ausgewählt werden.
+- **API:** `POST /v1/audio/speech` with `"voice": "de-DE-KatjaNeural"` (or any other Edge voice ID).
+- **Wyoming / Home Assistant:** Edge TTS appears alongside Pocket and Piper voices; language is mapped automatically.
+- **Voice Chat:** Edge voices can be selected like any other voice.
 
-## Hinweise
+## Notes
 
-- Die Synthese läuft über das Microsoft-Edge-TTS-API (Internetverbindung nötig).
-- Es gelten die üblichen Nutzungsbedingungen von Microsoft; die Nutzung entspricht der des Browsers „Vorlesen“.
-- Keine API-Keys oder Anmeldung erforderlich.
+- Synthesis uses the Microsoft Edge TTS API (internet connection required).
+- Normal Microsoft terms of use apply; usage is equivalent to the browser “Read aloud” feature.
+- No API keys or sign-in required.
 
-## Referenzen
+## References
 
-- [edge-tts auf GitHub](https://github.com/rany2/edge-tts)
-- [edge-tts auf PyPI](https://pypi.org/project/edge-tts/)
-- Stimmenliste: `edge-tts --list-voices`
+- [edge-tts on GitHub](https://github.com/rany2/edge-tts)
+- [edge-tts on PyPI](https://pypi.org/project/edge-tts/)
+- List voices: `edge-tts --list-voices`

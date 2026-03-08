@@ -6,6 +6,7 @@ Run from project root: python check_gpu.py
 
 import sys
 
+
 def main():
     print("=" * 60)
     print("GPU/XPU availability check (PyTorch)")
@@ -14,6 +15,7 @@ def main():
     # PyTorch
     try:
         import torch
+
         print(f"\nPyTorch version: {torch.__version__}")
     except ImportError:
         print("\n[FAIL] PyTorch not installed.")
@@ -42,7 +44,9 @@ def main():
         except Exception as e:
             print(f"    (details: {e})")
     else:
-        print("    -> Install PyTorch with XPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu")
+        print(
+            "    -> Install PyTorch with XPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu"
+        )
         print("    -> Ensure Intel Arc drivers are installed and up to date.")
 
     # Config device
@@ -50,9 +54,10 @@ def main():
     try:
         import json
         from pathlib import Path
+
         cfg_path = Path("config.json")
         if cfg_path.exists():
-            with open(cfg_path, "r") as f:
+            with open(cfg_path) as f:
                 cfg = json.load(f)
             dev = cfg.get("tts", {}).get("device", "cpu")
             print(f"config.json tts.device = '{dev}'")
@@ -65,7 +70,7 @@ def main():
     if xpu_ok:
         print("\n" + "-" * 60)
         try:
-            t = torch.randn(2, 2, device="xpu")
+            _ = torch.randn(2, 2, device="xpu")
             print("  XPU tensor test: OK (randn on xpu succeeded)")
         except Exception as e:
             print(f"  XPU tensor test: FAIL - {e}")
@@ -77,6 +82,7 @@ def main():
         print("At least one GPU backend is available.")
     print("=" * 60)
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

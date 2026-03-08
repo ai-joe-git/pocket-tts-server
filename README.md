@@ -73,7 +73,7 @@ Double-click **`run_pocket_tts.bat`**
 - 180-second timeout for slow LLMs
 - CPU optimized (GPU optional); **Intel Arc** via XPU supported — see [INTEL_ARC.md](INTEL_ARC.md)
 - **Piper** voice models supported (optional) — see [PIPER.md](PIPER.md)
-- **Edge TTS** (Microsoft, kostenlos, 70+ Sprachen) — see [EDGE_TTS.md](EDGE_TTS.md)
+- **Edge TTS** (Microsoft, free, 70+ languages) — see [EDGE_TTS.md](EDGE_TTS.md)
 - **Wyoming** protocol for [Home Assistant](https://www.home-assistant.io/integrations/wyoming/) — see [WYOMING.md](WYOMING.md)
 - 76+ voices included (celebrities, characters, custom)
 
@@ -102,6 +102,26 @@ python pocket_tts_api.py
 - Python 3.8+
 - 4GB+ RAM
 - Audio: WAV, MP3, OGG, FLAC supported
+
+### Linting & formatting (optional)
+
+The project uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. Config is in `pyproject.toml`.
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .          # lint
+ruff format .         # format
+ruff check . --fix    # auto-fix safe issues
+```
+
+### Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Tests cover Wyoming protocol encoding, sentence splitting, and HTTP endpoints (health, voices, speech validation). API tests require the main dependencies (e.g. `pocket-tts`) to be installed.
 
 ### Hugging Face access (Pocket TTS model)
 
