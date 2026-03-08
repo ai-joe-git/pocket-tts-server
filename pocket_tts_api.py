@@ -15,6 +15,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from contextlib import asynccontextmanager
 import tempfile
+import time
 import io
 import subprocess
 
@@ -489,19 +490,22 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
         while True:
             line = await reader.readline()
             if not line:
+                print("[INFO] Wyoming: client disconnected (no data)")
                 break
             try:
                 msg = json.loads(line.decode("utf-8").strip())
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 print(f"[WARNING] Wyoming: invalid message: {e}")
                 break
-            msg_type = msg.get("type")
+            msg_type = msg.get("type", "")
             data = msg.get("data") or {}
             payload_len = msg.get("payload_length", 0)
+            print(f"[INFO] Wyoming: received message type={msg_type!r}")
             if payload_len > 0:
                 try:
                     payload = await reader.readexactly(payload_len)
                 except asyncio.IncompleteReadError:
+                    print("[WARNING] Wyoming: incomplete payload read")
                     break
             else:
                 payload = b""
@@ -538,6 +542,15 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                     writer.write(_wyoming_encode_message("info", info_msg))
                     await writer.drain()
                     print("[INFO] Wyoming: describe -> info sent")
+                    # Pre-load first voice so first TTS request is faster (avoids HA timeout)
+                    if voices:
+                        first_id = voices[0]["name"]
+                        asyncio.get_event_loop().create_task(
+                            asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: get_voice_state(first_id),
+                            )
+                        )
                 except Exception as e:
                     print(f"[WARNING] Wyoming: failed to send info: {e}")
                     import traceback
@@ -549,17 +562,23 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                     continue
                 voice_id = voice_name if voice_name and voice_name in available_voices else None
                 loop = asyncio.get_event_loop()
+                t0 = time.monotonic()
                 result = await loop.run_in_executor(
                     None, _synthesize_to_pcm_sync, text, voice_id
                 )
+                elapsed = time.monotonic() - t0
+                print(f"[INFO] Wyoming: synthesis took {elapsed:.1f}s")
                 if result:
                     rate, pcm = result
                     writer.write(_wyoming_encode_message("audio-start", {"rate": rate, "width": 2, "channels": 1}))
                     writer.write(_wyoming_encode_message("audio-chunk", {"rate": rate, "width": 2, "channels": 1}, pcm))
                     writer.write(_wyoming_encode_message("audio-stop", {}))
                 await writer.drain()
+            else:
+                if msg_type:
+                    print(f"[INFO] Wyoming: unhandled message type={msg_type!r}")
     except (ConnectionResetError, asyncio.IncompleteReadError):
-        pass
+        print("[INFO] Wyoming: connection closed")
     except Exception as e:
         print(f"[WARNING] Wyoming client error: {e}")
         import traceback

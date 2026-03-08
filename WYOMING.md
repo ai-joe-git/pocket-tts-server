@@ -64,6 +64,27 @@ Home Assistant will connect over TCP and use the Wyoming protocol to list voices
 
 Home Assistant only enables a TTS entity if it supports the **language** of your HA profile (or the voice assistant). This server reports support for **English (`en`) and German (`de`)**. If your Home Assistant UI language is set to one of these, the entity should be selectable after a reload. If you use another language only, the entity can stay grayed out; in that case set the assistant’s language to English or German for this TTS, or we can add more language codes to the server.
 
+**TTS test times out**
+
+The first synthesis can take several seconds (loading the voice). Home Assistant may use a short timeout; if the test times out:
+
+1. **Try again** – The second request is usually faster because the voice is already loaded (the server pre-loads the first voice after `describe`).
+2. **Check the server log** – You should see `Wyoming: synthesis took X.Xs`. If it's often over 10–15 seconds, the machine may be slow or the voice/model is large.
+3. **Use a short test phrase** – In HA when testing, use e.g. "Test" so synthesis finishes sooner.
+
+**Server does not receive the TTS request (no timeout, request never arrives)**
+
+When you click **Test** in Home Assistant, HA opens a **new** TCP connection to the Wyoming port and sends a `synthesize` message. Watch the server console:
+
+- You should see a **second** `Wyoming: client connected from …` when you click Test (the first was for loading the integration).
+- Then `Wyoming: received message type='synthesize'`.
+
+If you **do not** see a second connection when testing:
+
+- **Host in Wyoming** must be the IP of the machine that runs this server, reachable from the machine that runs Home Assistant (e.g. `192.168.x.x`). Using `localhost` only works if HA runs on the same machine as this server.
+- **Firewall** on the Pocket TTS server must allow **incoming** TCP on the Wyoming port (e.g. 10300) from the HA host.
+- In HA, remove the Wyoming server and add it again with the correct host (IP address) and port, then try Test again.
+
 ## References
 
 - [Wyoming protocol](https://github.com/rhasspy/wyoming) (Rhasspy/OHF)
