@@ -58,6 +58,16 @@ try:
 except ImportError:
     PIPER_AVAILABLE = False
 
+# Try to import Edge TTS (optional; free Microsoft TTS via browser API)
+try:
+    import edge_tts
+
+    EDGE_TTS_AVAILABLE = True
+    print("[INFO] edge-tts imported successfully")
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+    edge_tts = None
+
 
 # Load configuration
 def load_config():
@@ -78,6 +88,7 @@ def load_config():
         "tts": {
             "device": "cpu",  # "cpu", "xpu" (Intel Arc), or "cuda" (Pocket TTS)
             "piper_use_cuda": False,  # Piper: use NVIDIA GPU via onnxruntime-gpu
+            "edge_tts_enabled": False,  # Microsoft Edge TTS (free, 70+ languages)
         },
         "llm": {
             "enabled": False,
@@ -212,6 +223,33 @@ def _piper_synthesize_to_wav_bytes(voice_id, text):
         return None
 
 
+def _edgetts_synthesize_to_wav_bytes(voice_id: str, text: str):
+    """Synthesize text with Edge TTS; return WAV bytes. Uses free Microsoft Edge TTS API."""
+    if not EDGE_TTS_AVAILABLE or not edge_tts:
+        return None
+    try:
+        communicate = edge_tts.Communicate(text, voice=voice_id)
+        mp3_chunks = []
+        for chunk in communicate.stream_sync():
+            if chunk.get("type") == "audio" and chunk.get("data"):
+                mp3_chunks.append(chunk["data"])
+        if not mp3_chunks:
+            return None
+        mp3_bytes = b"".join(mp3_chunks)
+        if not PYDUB_AVAILABLE:
+            return None
+        audio = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
+        wav_buffer = io.BytesIO()
+        audio.export(wav_buffer, format="wav")
+        wav_buffer.seek(0)
+        return wav_buffer.read()
+    except Exception as e:
+        print(f"[WARNING] Edge TTS synthesis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def _synthesize_to_pcm_sync(text: str, voice_id: Optional[str]):
     """Synthesize text to raw PCM (16-bit mono). Returns (sample_rate, pcm_bytes) or None. For Wyoming."""
     if not voice_id and available_voices:
@@ -233,6 +271,14 @@ def _synthesize_to_pcm_sync(text: str, voice_id: Optional[str]):
             rate = getattr(chunks[0], "sample_rate", 22050)
             pcm = b"".join(c.audio_int16_bytes for c in chunks)
             return (rate, pcm)
+        if isinstance(voice_state, dict) and voice_state.get("engine") == "edgetts":
+            wav_bytes = _edgetts_synthesize_to_wav_bytes(voice_state["voice_id"], text)
+            if not wav_bytes:
+                return None
+            rate, arr = scipy.io.wavfile.read(io.BytesIO(wav_bytes))
+            if arr.dtype != np.int16:
+                arr = (np.clip(arr.astype(np.float64) / 32768.0, -1, 1) * 32767).astype(np.int16)
+            return (rate, arr.tobytes())
         if tts_model:
             audio = tts_model.generate_audio(voice_state, text)
             audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
@@ -341,6 +387,11 @@ def get_voice_state(voice_id):
     # Piper voices: return lightweight pseudo-state
     if available_voices[voice_id].get("engine") == "piper":
         voice_states[voice_id] = {"engine": "piper", "voice_id": voice_id}
+        return voice_states[voice_id]
+
+    # Edge TTS voices: no state to load
+    if available_voices[voice_id].get("engine") == "edgetts":
+        voice_states[voice_id] = {"engine": "edgetts", "voice_id": voice_id}
         return voice_states[voice_id]
 
     # Pocket voices: load from audio file
@@ -532,7 +583,7 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
             if msg_type == "describe":
                 print("[INFO] Wyoming: describe received")
                 # Wyoming/HA expect TtsProgram with "voices". Per-voice languages so HA shows only matching voices (e.g. German -> Piper de_DE).
-                def _wyoming_voice_languages(voice_id: str, engine: str) -> list:
+                def _wyoming_voice_languages(voice_id: str, engine: str, vinfo: dict) -> list:
                     if engine == "pocket":
                         return ["en"]  # Pocket TTS is English-only
                     if engine == "piper":
@@ -543,23 +594,28 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                         if v.startswith("en_") or "_en_" in v or v.startswith("en"):
                             out.append("en")
                         return out if out else ["en", "de"]
+                    if engine == "edgetts":
+                        locale = (vinfo.get("locale") or voice_id).split("-")[0].lower()
+                        if locale:
+                            return [locale]
+                        return ["en", "de"]
                     return ["en", "de"]
 
                 voices = []
                 for vid, vinfo in available_voices.items():
-                    if vinfo.get("engine") in ("pocket", "piper"):
+                    if vinfo.get("engine") in ("pocket", "piper", "edgetts"):
                         voices.append({
                             "name": vid,
                             "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
                             "installed": True,
-                            "languages": _wyoming_voice_languages(vid, vinfo.get("engine", "pocket")),
+                            "languages": _wyoming_voice_languages(vid, vinfo.get("engine", "pocket"), vinfo),
                             "description": vinfo.get("name", vid),
                         })
                 if not voices:
                     voices = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True, "languages": ["en", "de"], "description": "Default"}]
                 info_msg = {
                     "name": "Pocket TTS",
-                    "description": "Pocket TTS and Piper voices",
+                    "description": "Pocket TTS, Piper, and Edge TTS voices",
                     "tts": [{
                         "name": "Pocket TTS",
                         "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
@@ -641,11 +697,44 @@ async def _run_wyoming_server():
         await server.serve_forever()
 
 
+async def _load_edge_tts_voices():
+    """Fetch Edge TTS voice list and return list of voice dicts."""
+    if not EDGE_TTS_AVAILABLE or not edge_tts or not config.get("tts", {}).get("edge_tts_enabled", False):
+        return []
+    try:
+        voices_raw = await edge_tts.list_voices()
+        out = []
+        for v in voices_raw:
+            short = v.get("ShortName") or v.get("Name")
+            if not short:
+                continue
+            name = v.get("Name") or short
+            locale = (v.get("Locale") or "").strip()
+            out.append({
+                "voice_id": short,
+                "name": name,
+                "preview": "",
+                "type": "edgetts",
+                "engine": "edgetts",
+                "locale": locale,
+            })
+            print(f"[INFO] Found voice (Edge TTS): {short}")
+        return out
+    except Exception as e:
+        print(f"[WARNING] Edge TTS list_voices failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler"""
     global available_voices
     available_voices = {v["voice_id"]: v for v in scan_voices()}
+    edge_voices = await _load_edge_tts_voices()
+    for v in edge_voices:
+        available_voices[v["voice_id"]] = v
     print(f"[INFO] Found {len(available_voices)} voices (loaded on-demand)")
     wyoming_task = None
     if config.get("wyoming", {}).get("enabled"):
@@ -693,10 +782,15 @@ async def create_speech(request: OpenAITTSRequest):
     """
     OpenAI-compatible TTS endpoint (Pocket TTS and Piper voices)
     """
-    if not tts_model and not PIPER_AVAILABLE:
+    tts_available = (
+        tts_model is not None
+        or PIPER_AVAILABLE
+        or (EDGE_TTS_AVAILABLE and config.get("tts", {}).get("edge_tts_enabled"))
+    )
+    if not tts_available:
         raise HTTPException(
             status_code=503,
-            detail="TTS service not available. Install pocket_tts and/or piper-tts.",
+            detail="TTS service not available. Install pocket_tts, piper-tts, and/or edge-tts.",
         )
 
     try:
@@ -717,6 +811,12 @@ async def create_speech(request: OpenAITTSRequest):
             if not audio_data:
                 raise HTTPException(
                     status_code=500, detail="Piper TTS generation failed"
+                )
+        elif isinstance(voice_state, dict) and voice_state.get("engine") == "edgetts":
+            audio_data = _edgetts_synthesize_to_wav_bytes(voice_state["voice_id"], request.input)
+            if not audio_data:
+                raise HTTPException(
+                    status_code=500, detail="Edge TTS generation failed"
                 )
         else:
             # Pocket path
@@ -994,13 +1094,20 @@ def split_into_sentences(text):
 
 
 def generate_sentence_audio_sync(voice_state, sentence):
-    """Generate audio for a single sentence (synchronous). Supports Pocket and Piper."""
+    """Generate audio for a single sentence (synchronous). Supports Pocket, Piper, and Edge TTS."""
     try:
         # Piper path
         if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
             audio_bytes = _piper_synthesize_to_wav_bytes(
                 voice_state["voice_id"], sentence
             )
+            if audio_bytes:
+                return base64.b64encode(audio_bytes).decode()
+            return None
+
+        # Edge TTS path
+        if isinstance(voice_state, dict) and voice_state.get("engine") == "edgetts":
+            audio_bytes = _edgetts_synthesize_to_wav_bytes(voice_state["voice_id"], sentence)
             if audio_bytes:
                 return base64.b64encode(audio_bytes).decode()
             return None
@@ -1156,6 +1263,10 @@ async def chat_completions(request: VoiceChatRequest):
                     audio_bytes = _piper_synthesize_to_wav_bytes(
                         voice_state["voice_id"], response_text
                     )
+                    if audio_bytes:
+                        audio_data = base64.b64encode(audio_bytes).decode()
+                elif isinstance(voice_state, dict) and voice_state.get("engine") == "edgetts":
+                    audio_bytes = _edgetts_synthesize_to_wav_bytes(voice_state["voice_id"], response_text)
                     if audio_bytes:
                         audio_data = base64.b64encode(audio_bytes).decode()
                 else:

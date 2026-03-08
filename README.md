@@ -73,6 +73,7 @@ Double-click **`run_pocket_tts.bat`**
 - 180-second timeout for slow LLMs
 - CPU optimized (GPU optional); **Intel Arc** via XPU supported — see [INTEL_ARC.md](INTEL_ARC.md)
 - **Piper** voice models supported (optional) — see [PIPER.md](PIPER.md)
+- **Edge TTS** (Microsoft, kostenlos, 70+ Sprachen) — see [EDGE_TTS.md](EDGE_TTS.md)
 - **Wyoming** protocol for [Home Assistant](https://www.home-assistant.io/integrations/wyoming/) — see [WYOMING.md](WYOMING.md)
 - 76+ voices included (celebrities, characters, custom)
 
