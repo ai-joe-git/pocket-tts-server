@@ -130,6 +130,22 @@ The Pocket TTS model is hosted on Hugging Face. You must **accept the model term
 2. Restart server (or new files are picked up on next scan).
 3. Files auto-convert to WAV; originals archived to `*-archive/` folders.
 
+### Method 3: Download voices from Hugging Face (kyutai/tts-voices)
+You can download the official Kyutai TTS voice pack into `voices-pockettts/` (subfolders are scanned automatically).
+
+1. **Upgrade Hugging Face Hub** (recommended):
+   ```bash
+   pip install --upgrade huggingface_hub
+   ```
+2. **Log in** if required (same as for the Pocket TTS model): `uvx hf auth login`
+3. **Download the voice repo** into the server folder:
+   ```bash
+   python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='kyutai/tts-voices', local_dir='./voices-pockettts', local_dir_use_symlinks=False)"
+   ```
+4. Restart the server. Voices from all subfolders under `voices-pockettts/` will be listed.
+
+After the download, `voices-pockettts/` contains subfolders (e.g. `alba-mackenna`, `cml-tts`, `ears`, `expresso`, `vctk`, `voice-donations`, etc.). For a description of each voice set, see **`voices-pockettts/README.md`** or the repo: [kyutai/tts-voices on Hugging Face](https://huggingface.co/kyutai/tts-voices).
+
 **Voice Quality Tips:**
 - ✅ **Best length:** 15-20 seconds
 - ✅ **Max length:** 20 seconds (longer files auto-trimmed)

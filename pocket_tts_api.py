@@ -248,7 +248,7 @@ def _synthesize_to_pcm_sync(text: str, voice_id: Optional[str]):
 
 
 def _scan_pocket_voices_dir(voices_dir: Path):
-    """Scan one directory for Pocket TTS voices (WAV); auto-convert MP3/OGG/FLAC. Returns list of voice dicts."""
+    """Scan directory (and subdirs) for Pocket TTS voices (WAV); auto-convert MP3/OGG/FLAC in root. Returns list of voice dicts."""
     out = []
     if not voices_dir.exists():
         return out
@@ -265,8 +265,18 @@ def _scan_pocket_voices_dir(voices_dir: Path):
                     )
                 except Exception as e:
                     print(f"[ERROR] Failed to convert {voice_file.name}: {e}")
-    for voice_file in voices_dir.glob("*.wav"):
-        voice_id = voice_file.stem.lower().replace(" ", "-").replace("_", "-")
+    for voice_file in voices_dir.rglob("*.wav"):
+        if not voice_file.is_file():
+            continue
+        try:
+            rel = voice_file.relative_to(voices_dir)
+        except ValueError:
+            continue
+        # Unique id from path (e.g. subfolder/speaker.wav -> subfolder-speaker)
+        path_stem = str(rel.with_suffix("")).replace("\\", "/")
+        voice_id = path_stem.replace("/", "-").replace(" ", "-").replace("_", "-").lower()
+        if not voice_id:
+            voice_id = voice_file.stem.lower().replace(" ", "-").replace("_", "-")
         out.append(
             {
                 "voice_id": voice_id,
