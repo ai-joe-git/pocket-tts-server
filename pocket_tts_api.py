@@ -244,16 +244,22 @@ def scan_voices():
             )
             print(f"[INFO] Found voice (Pocket): {voice_id}")
 
-    # Scan Piper voices (optional)
+    # Scan Piper voices (optional); support .onnx in root and in subdirs (e.g. voices-piper/vits-piper-de_DE-thorsten-high/)
     if PIPER_AVAILABLE:
         piper_dir = Path(config["paths"].get("voices_piper_dir", "voices-piper"))
         if piper_dir.exists():
-            for onnx_file in piper_dir.glob("*.onnx"):
-                voice_id = onnx_file.stem.lower().replace(" ", "-").replace("_", "-")
+            for onnx_file in piper_dir.rglob("*.onnx"):
+                parent = onnx_file.parent
+                # Use folder name as voice_id when .onnx is inside a subdir, else file stem
+                if parent != piper_dir:
+                    name_for_id = parent.name
+                else:
+                    name_for_id = onnx_file.stem
+                voice_id = name_for_id.lower().replace(" ", "-")
                 voices.append(
                     {
                         "voice_id": voice_id,
-                        "name": onnx_file.stem,
+                        "name": name_for_id,
                         "file": str(onnx_file),
                         "preview": "",
                         "type": "piper",

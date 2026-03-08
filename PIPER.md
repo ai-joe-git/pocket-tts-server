@@ -14,7 +14,7 @@ You can use **Piper** voice models alongside Pocket TTS. Piper uses pre-trained 
    python -m piper.download_voices en_US-lessac-medium
    ```
 
-3. **Put `.onnx` (and optional `.onnx.json`) files** in the Piper voices folder. Default folder: `voices-piper/` in the project root.
+3. **Put `.onnx` (and optional `.onnx.json`) files** in the Piper voices folder. Default folder: `voices-piper/` in the project root. You can place files directly in `voices-piper/` or inside subfolders.
 
    Example layout:
    ```
@@ -22,8 +22,11 @@ You can use **Piper** voice models alongside Pocket TTS. Piper uses pre-trained 
      en_US-lessac-medium.onnx
      en_US-lessac-medium.onnx.json
      de_DE-thorsten-low.onnx
-     ...
+     vits-piper-de_DE-thorsten-high/    ← subfolder supported
+       model.onnx
+       model.onnx.json
    ```
+   The voice ID is the **folder name** when the `.onnx` is inside a subfolder, otherwise the **file name** (without extension). So `vits-piper-de_DE-thorsten-high` appears as one voice.
 
 4. **Restart the server.** Piper voices show up in `/v1/audio/voices` and work with `/v1/audio/speech` and Voice Chat like Pocket voices.
 
