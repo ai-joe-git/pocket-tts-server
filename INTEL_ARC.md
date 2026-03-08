@@ -1,47 +1,53 @@
-# Intel Arc mit Pocket TTS Server nutzen
+# Using Intel Arc with Pocket TTS Server
 
-Ab PyTorch 2.5 unterstützt PyTorch **Intel Arc** (und andere Intel GPUs) unter Windows über das Gerät **XPU**. So nutzt du deine Intel Arc GPU für die TTS-Inferenz.
-
----
-
-## Voraussetzungen
-
-- **Windows 10/11** (empfohlen: Windows 11)
-- **Intel Arc** Grafikkarte (A-Series, B-Series Battlemage usw.) oder Intel Core Ultra mit integrierter Arc-Grafik
-- **Aktueller Intel-Grafiktreiber**  
-  [Intel Grafiktreiber](https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html) (Version 32.0.101.6078 oder neuer)
-- **Resizable BAR** in BIOS aktivieren (für Arc dGPU empfohlen)
+As of PyTorch 2.5, PyTorch supports **Intel Arc** (and other Intel GPUs) on Windows via the **XPU** device. This guide explains how to use your Intel Arc GPU for TTS inference.
 
 ---
 
-## Schritte
+## Prerequisites
 
-### 1. PyTorch mit Intel XPU installieren
+- **Windows 10/11** (Windows 11 recommended)
+- **Intel Arc** graphics (A-Series, B-Series Battlemage, etc.) or Intel Core Ultra with integrated Arc graphics
+- **Up-to-date Intel graphics driver**  
+  [Intel Graphics Drivers](https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html) (version 32.0.101.6078 or newer)
+- **Resizable BAR** enabled in BIOS (recommended for Arc dGPU)
 
-Der Standard-Installer (`install_pocket_tts.bat`) installiert PyTorch nur für **CPU**. Für Intel Arc musst du PyTorch mit XPU nachinstallieren.
+---
 
-**In der Projekt-venv:**
+## Steps
+
+### 1. Install PyTorch with Intel XPU
+
+The default installer (`install_pocket_tts.bat`) installs PyTorch for **CPU** only. For Intel Arc, install the XPU build of PyTorch.
+
+**Inside the project venv:**
 
 ```powershell
-cd c:\Users\pw\git\pocket-tts-server
+cd C:\path\to\pocket-tts-server
 .\venv\Scripts\activate
 pip uninstall torch torchvision torchaudio -y
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 ```
 
-**XPU verfügbar prüfen:**
+**Verify XPU is available:**
 
 ```powershell
 python -c "import torch; print('XPU available:', torch.xpu.is_available())"
 ```
 
-Wenn `True` ausgegeben wird, ist die Intel GPU für PyTorch nutzbar.
+Or run the included check script:
+
+```powershell
+python check_gpu.py
+```
+
+If you see `True` or "XPU (Intel Arc): available", the Intel GPU is ready for PyTorch.
 
 ---
 
-### 2. Gerät in der Konfiguration setzen
+### 2. Set the device in configuration
 
-In **`config.json`** die TTS-Geräte-Option auf `xpu` setzen:
+In **`config.json`**, set the TTS device option to `xpu`:
 
 ```json
 {
@@ -51,40 +57,40 @@ In **`config.json`** die TTS-Geräte-Option auf `xpu` setzen:
 }
 ```
 
-Falls der Abschnitt `tts` noch fehlt, einfach an beliebiger Stelle (z.B. nach `"paths"`) einfügen.
+If the `tts` section is missing, add it (e.g. after `"paths"`).
 
 ---
 
-### 3. Server starten
+### 3. Start the server
 
-Wie gewohnt:
+As usual:
 
 ```powershell
 .\run_pocket_tts.bat
 ```
 
-bzw. `python pocket_tts_api.py`
+or `python pocket_tts_api.py`
 
-In der Konsole solltest du beim Start etwas wie:
+On startup you should see something like:
 
-```text
+```
 [INFO] Loading TTS model (device: xpu)...
 [INFO] TTS model loaded successfully (sample rate: 24000Hz, device: xpu)
 ```
 
-sehen. Dann läuft das TTS-Modell auf der Intel Arc GPU.
+The TTS model is then running on the Intel Arc GPU.
 
 ---
 
-## Hinweise
+## Notes
 
-- **pocket-tts** ist standardmäßig CPU-orientiert. Ob und wie stark es von XPU profitiert, hängt von der Bibliothek (Geräte-Nutzung) ab. Mit `device: xpu` wird das Gerät an die Bibliothek übergeben; falls sie es nicht unterstützt, fällt der Server intern auf CPU zurück (mit entsprechender Meldung).
-- **Treiber:** Bei Problemen (z.B. `XPU available: False`) zuerst den [Intel Arc Treiber](https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html) aktualisieren und ggf. Resizable BAR in BIOS aktivieren.
-- **Zurück auf CPU:** In `config.json` wieder `"device": "cpu"` setzen.
+- **pocket-tts** is primarily CPU-oriented. Whether and how much it benefits from XPU depends on the library’s device handling. With `device: xpu` the server passes the device to the library; if the library does not support it, the server falls back to CPU (with a warning).
+- **Drivers:** If you see `XPU available: False`, update the [Intel Arc driver](https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html) and ensure Resizable BAR is enabled in BIOS if applicable.
+- **Back to CPU:** Set `"device": "cpu"` in `config.json`.
 
 ---
 
-## Referenzen
+## References
 
 - [PyTorch – Getting Started on Intel GPU (XPU)](https://pytorch.org/docs/main/notes/get_start_xpu.html)
 - [Intel GPU Support in PyTorch 2.5 (Blog)](https://pytorch.org/blog/intel-gpu-support-pytorch-2-5/)

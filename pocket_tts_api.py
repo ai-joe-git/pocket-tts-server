@@ -412,8 +412,8 @@ async def create_speech(request: OpenAITTSRequest):
         # Generate audio
         audio = tts_model.generate_audio(voice_state, request.input)
 
-        # Convert to WAV
-        audio_np = audio.numpy()
+        # Convert to WAV (move to CPU first if tensor is on GPU/XPU)
+        audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
 
         # Create WAV file in memory
         wav_buffer = io.BytesIO()
@@ -686,7 +686,7 @@ def generate_sentence_audio_sync(voice_state, sentence):
     """Generate audio for a single sentence (synchronous version for thread pool)"""
     try:
         audio = tts_model.generate_audio(voice_state, sentence)
-        audio_np = audio.numpy()
+        audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
 
         # Convert to WAV
         wav_buffer = io.BytesIO()
@@ -854,7 +854,7 @@ async def chat_completions(request: VoiceChatRequest):
             if voice_state:
                 try:
                     audio = tts_model.generate_audio(voice_state, response_text)
-                    audio_np = audio.numpy()
+                    audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
 
                     # Convert to WAV in memory
                     wav_buffer = io.BytesIO()
