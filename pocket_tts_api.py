@@ -508,7 +508,8 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
 
             if msg_type == "describe":
                 print("[INFO] Wyoming: describe received")
-                # Wyoming/HA expect TtsProgram with "voices" (not "models"/"speakers"). Each voice: name, attribution, installed, languages.
+                # Wyoming/HA expect TtsProgram with "voices". Each voice: name, attribution, installed, languages.
+                # Report en + de so entity is selectable when HA language is English or German.
                 voices = []
                 for vid, vinfo in available_voices.items():
                     if vinfo.get("engine") in ("pocket", "piper"):
@@ -516,10 +517,11 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                             "name": vid,
                             "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
                             "installed": True,
-                            "languages": ["en"],
+                            "languages": ["en", "de"],
+                            "description": vinfo.get("name", vid),
                         })
                 if not voices:
-                    voices = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True, "languages": ["en"]}]
+                    voices = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True, "languages": ["en", "de"], "description": "Default"}]
                 info_msg = {
                     "name": "Pocket TTS",
                     "description": "Pocket TTS and Piper voices",

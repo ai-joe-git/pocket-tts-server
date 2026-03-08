@@ -60,6 +60,10 @@ Home Assistant will connect over TCP and use the Wyoming protocol to list voices
 
 4. **Restart** – Restart this server after changing `config.json`, then in HA remove and re-add the Wyoming server if the problem persists.
 
+**TTS entity is grayed out / cannot select**
+
+Home Assistant only enables a TTS entity if it supports the **language** of your HA profile (or the voice assistant). This server reports support for **English (`en`) and German (`de`)**. If your Home Assistant UI language is set to one of these, the entity should be selectable after a reload. If you use another language only, the entity can stay grayed out; in that case set the assistant’s language to English or German for this TTS, or we can add more language codes to the server.
+
 ## References
 
 - [Wyoming protocol](https://github.com/rhasspy/wyoming) (Rhasspy/OHF)
