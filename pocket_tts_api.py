@@ -545,12 +545,10 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
                     # Pre-load first voice so first TTS request is faster (avoids HA timeout)
                     if voices:
                         first_id = voices[0]["name"]
-                        asyncio.get_event_loop().create_task(
-                            asyncio.get_event_loop().run_in_executor(
-                                None,
-                                lambda: get_voice_state(first_id),
-                            )
-                        )
+                        async def _warmup():
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, lambda: get_voice_state(first_id))
+                        asyncio.create_task(_warmup())
                 except Exception as e:
                     print(f"[WARNING] Wyoming: failed to send info: {e}")
                     import traceback
