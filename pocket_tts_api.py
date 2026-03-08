@@ -55,6 +55,7 @@ def load_config():
     default_config = {
         "server": {"host": "localhost", "port": 8000},
         "paths": {"voices_dir": "voices-celebrities", "output_dir": "output"},
+        "tts": {"device": "cpu"},  # "cpu", "xpu" (Intel Arc), or "cuda"
         "llm": {
             "enabled": False,
             "api_url": "http://localhost:8080/v1/chat/completions",
@@ -97,12 +98,42 @@ config = load_config()
 tts_model = None
 voice_states = {}  # Cache voice states
 
+def _resolve_tts_device():
+    """Resolve TTS device from config; fall back to cpu if xpu/cuda unavailable."""
+    device = config.get("tts", {}).get("device", "cpu").strip().lower()
+    if device == "xpu":
+        try:
+            import torch
+            if getattr(torch, "xpu", None) and torch.xpu.is_available():
+                return "xpu"
+        except Exception:
+            pass
+        print("[WARNING] XPU (Intel Arc) requested but not available; using CPU")
+        return "cpu"
+    if device == "cuda":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+        print("[WARNING] CUDA requested but not available; using CPU")
+        return "cpu"
+    return device if device in ("cpu", "cuda", "xpu") else "cpu"
+
+
 if POCKET_TTS_AVAILABLE:
     try:
-        print("[INFO] Loading TTS model...")
-        tts_model = TTSModel.load_model()
+        tts_device = _resolve_tts_device()
+        print(f"[INFO] Loading TTS model (device: {tts_device})...")
+        try:
+            tts_model = TTSModel.load_model(device=tts_device)
+        except TypeError:
+            tts_model = TTSModel.load_model()
+            if hasattr(tts_model, "to"):
+                tts_model = tts_model.to(tts_device)
         print(
-            f"[INFO] TTS model loaded successfully (sample rate: {tts_model.sample_rate}Hz)"
+            f"[INFO] TTS model loaded successfully (sample rate: {tts_model.sample_rate}Hz, device: {tts_device})"
         )
     except Exception as e:
         print(f"[WARNING] Failed to load TTS model: {e}")

@@ -71,7 +71,7 @@ Double-click **`run_pocket_tts.bat`**
 ### ⚡ Performance
 - 4000 token support for long responses
 - 180-second timeout for slow LLMs
-- CPU optimized (GPU optional)
+- CPU optimized (GPU optional); **Intel Arc** via XPU supported — see [INTEL_ARC.md](INTEL_ARC.md)
 - 76+ voices included (celebrities, characters, custom)
 
 ---
@@ -219,6 +219,9 @@ Edit `config.json` or use Settings page:
   "server": {
     "host": "localhost",
     "port": 8000
+  },
+  "tts": {
+    "device": "cpu"
   },
   "llm": {
     "enabled": true,
