@@ -68,7 +68,10 @@ def load_config():
             "voices_piper_dir": "voices-piper",
             "output_dir": "output",
         },
-        "tts": {"device": "cpu"},  # "cpu", "xpu" (Intel Arc), or "cuda"
+        "tts": {
+            "device": "cpu",  # "cpu", "xpu" (Intel Arc), or "cuda" (Pocket TTS)
+            "piper_use_cuda": False,  # Piper: use NVIDIA GPU via onnxruntime-gpu
+        },
         "llm": {
             "enabled": False,
             "api_url": "http://localhost:8080/v1/chat/completions",
@@ -172,7 +175,8 @@ def _get_piper_voice(voice_id):
     if info.get("engine") != "piper":
         return None
     try:
-        voice = PiperVoice.load(info["file"])
+        use_cuda = config.get("tts", {}).get("piper_use_cuda", False)
+        voice = PiperVoice.load(info["file"], use_cuda=use_cuda)
         piper_voices[voice_id] = voice
         return voice
     except Exception as e:

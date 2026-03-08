@@ -44,6 +44,19 @@ In `config.json` you can set the Piper directory:
 }
 ```
 
+## CPU vs GPU
+
+Piper runs on **CPU by default**. To use an **NVIDIA GPU** for Piper:
+
+1. Install the GPU build of ONNX Runtime:  
+   `pip install onnxruntime-gpu`
+2. In `config.json` set:  
+   `"tts": { "piper_use_cuda": true }`  
+   (or add `"piper_use_cuda": true` under existing `"tts"`).
+3. Restart the server.
+
+**Intel Arc:** Piper uses ONNX Runtime; GPU support there is via CUDA (NVIDIA). Intel Arc is not supported by Piper’s built-in `use_cuda` option. So on Intel Arc, Piper will use CPU; Pocket TTS can still use XPU (see [INTEL_ARC.md](INTEL_ARC.md)).
+
 ## Compatibility
 
 - **Pocket TTS**: clone-from-audio voices (WAV in `voices-celebrities/`), engine `pocket`.
