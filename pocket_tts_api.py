@@ -508,29 +508,26 @@ async def _wyoming_handle_client(reader: asyncio.StreamReader, writer: asyncio.S
 
             if msg_type == "describe":
                 print("[INFO] Wyoming: describe received")
-                speakers = []
-                for vid, info in available_voices.items():
-                    if info.get("engine") in ("pocket", "piper"):
-                        speakers.append({
+                # Wyoming/HA expect TtsProgram with "voices" (not "models"/"speakers"). Each voice: name, attribution, installed, languages.
+                voices = []
+                for vid, vinfo in available_voices.items():
+                    if vinfo.get("engine") in ("pocket", "piper"):
+                        voices.append({
                             "name": vid,
                             "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
                             "installed": True,
+                            "languages": ["en"],
                         })
-                if not speakers:
-                    speakers = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True}]
-                # Match structure expected by Home Assistant: one TTS service with name, one model, speakers list
+                if not voices:
+                    voices = [{"name": "default", "attribution": {"name": "Pocket TTS", "url": "https://kyutai.org"}, "installed": True, "languages": ["en"]}]
                 info_msg = {
                     "name": "Pocket TTS",
                     "description": "Pocket TTS and Piper voices",
                     "tts": [{
-                        "name": "pocket-tts",
-                        "models": [{
-                            "name": "pocket-tts",
-                            "languages": ["en"],
-                            "speakers": speakers,
-                            "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
-                            "installed": True,
-                        }],
+                        "name": "Pocket TTS",
+                        "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
+                        "installed": True,
+                        "voices": voices,
                     }],
                     "attribution": {"name": "Pocket TTS Server", "url": "https://github.com/ai-joe-git/pocket-tts-server"},
                     "installed": True,
