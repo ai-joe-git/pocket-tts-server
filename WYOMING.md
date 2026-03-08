@@ -36,6 +36,20 @@ Restart the server. You should see:
 
 Home Assistant will connect over TCP and use the Wyoming protocol to list voices and request TTS. All Pocket TTS and Piper voices from this server are exposed as Wyoming TTS voices.
 
+### Sprache / Deutsch
+
+**Pocket TTS** ist derzeit **nur für Englisch** trainiert. Bei deutscher Sprache in Home Assistant klingen Pocket-Stimmen daher wie englische Sprecher, die Deutsch lesen.
+
+**Für gutes Deutsch:** Nutze eine **Piper-Stimme mit de_DE**, z. B.:
+
+1. Piper-Stimme herunterladen:  
+   `python -m piper.download_voices de_DE-thorsten-medium`  
+   (oder eine andere aus [Rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices))
+2. Die `.onnx`-Datei(en) nach `voices-piper/` legen (siehe [PIPER.md](PIPER.md)).
+3. Server neu starten.
+
+Wenn in Home Assistant **Sprache = Deutsch** eingestellt ist, listet die Wyoming-Integration nur Stimmen mit Deutsch-Unterstützung – also die Piper-**de_DE**-Stimmen. Pocket-Stimmen erscheinen dort nur bei Sprache Englisch.
+
 ## Behaviour
 
 - The Wyoming server runs in the **same process** as the HTTP API and starts/stops with it.
@@ -62,7 +76,7 @@ Home Assistant will connect over TCP and use the Wyoming protocol to list voices
 
 **TTS entity is grayed out / cannot select**
 
-Home Assistant only enables a TTS entity if it supports the **language** of your HA profile (or the voice assistant). This server reports support for **English (`en`) and German (`de`)**. If your Home Assistant UI language is set to one of these, the entity should be selectable after a reload. If you use another language only, the entity can stay grayed out; in that case set the assistant’s language to English or German for this TTS, or we can add more language codes to the server.
+Home Assistant only enables a TTS entity if it supports the **language** of your HA profile (or the voice assistant). This server reports **per-voice** languages: Pocket TTS voices are English only (`en`); Piper voices are inferred from the voice ID (e.g. `de_DE-thorsten` → German, `en_US-lessac` → English). If your HA language is German, you need at least one Piper **de_DE** voice in `voices-piper/` so that a voice is offered. If you use another language only, the entity can stay grayed out; set the assistant’s language to English or German for this TTS, or add more language codes to the server.
 
 **TTS test times out**
 
