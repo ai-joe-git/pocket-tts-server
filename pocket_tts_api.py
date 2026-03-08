@@ -48,13 +48,26 @@ except ImportError as e:
     print(f"[WARNING] pocket_tts not installed: {e}")
     print("[INFO] Run: pip install pocket-tts")
 
+# Try to import Piper TTS (optional; for Piper voice models)
+try:
+    from piper import PiperVoice
+
+    PIPER_AVAILABLE = True
+    print("[INFO] piper-tts imported successfully")
+except ImportError:
+    PIPER_AVAILABLE = False
+
 
 # Load configuration
 def load_config():
     config_path = Path("config.json")
     default_config = {
         "server": {"host": "localhost", "port": 8000},
-        "paths": {"voices_dir": "voices-celebrities", "output_dir": "output"},
+        "paths": {
+            "voices_dir": "voices-celebrities",
+            "voices_piper_dir": "voices-piper",
+            "output_dir": "output",
+        },
         "tts": {"device": "cpu"},  # "cpu", "xpu" (Intel Arc), or "cuda"
         "llm": {
             "enabled": False,
@@ -146,6 +159,46 @@ else:
 
 # Voice cache
 available_voices = {}
+piper_voices = {}  # voice_id -> PiperVoice instance (lazy-loaded)
+
+
+def _get_piper_voice(voice_id):
+    """Load and cache Piper voice by voice_id."""
+    if voice_id in piper_voices:
+        return piper_voices[voice_id]
+    if not PIPER_AVAILABLE or voice_id not in available_voices:
+        return None
+    info = available_voices[voice_id]
+    if info.get("engine") != "piper":
+        return None
+    try:
+        voice = PiperVoice.load(info["file"])
+        piper_voices[voice_id] = voice
+        return voice
+    except Exception as e:
+        print(f"[WARNING] Failed to load Piper voice {voice_id}: {e}")
+        return None
+
+
+def _piper_synthesize_to_wav_bytes(voice_id, text):
+    """Synthesize text with Piper voice; return WAV bytes. Returns None on error."""
+    voice = _get_piper_voice(voice_id)
+    if not voice:
+        return None
+    try:
+        chunks = list(voice.synthesize(text))
+        if not chunks:
+            return None
+        sample_rate = getattr(chunks[0], "sample_rate", 22050)
+        raw = b"".join(c.audio_int16_bytes for c in chunks)
+        arr = np.frombuffer(raw, dtype=np.int16)
+        buf = io.BytesIO()
+        scipy.io.wavfile.write(buf, sample_rate, arr)
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        print(f"[WARNING] Piper synthesis failed: {e}")
+        return None
 
 
 def scan_voices():
@@ -186,19 +239,47 @@ def scan_voices():
                     "file": str(voice_file),
                     "preview": f"/voices/{voice_id}/preview",
                     "type": "custom",
+                    "engine": "pocket",
                 }
             )
-            print(f"[INFO] Found voice: {voice_id}")
+            print(f"[INFO] Found voice (Pocket): {voice_id}")
+
+    # Scan Piper voices (optional)
+    if PIPER_AVAILABLE:
+        piper_dir = Path(config["paths"].get("voices_piper_dir", "voices-piper"))
+        if piper_dir.exists():
+            for onnx_file in piper_dir.glob("*.onnx"):
+                voice_id = onnx_file.stem.lower().replace(" ", "-").replace("_", "-")
+                voices.append(
+                    {
+                        "voice_id": voice_id,
+                        "name": onnx_file.stem,
+                        "file": str(onnx_file),
+                        "preview": "",
+                        "type": "piper",
+                        "engine": "piper",
+                    }
+                )
+                print(f"[INFO] Found voice (Piper): {voice_id}")
 
     return voices
 
 
 def get_voice_state(voice_id):
-    """Get or load voice state on-demand"""
+    """Get or load voice state on-demand. For Piper voices returns a pseudo-state dict."""
     if voice_id in voice_states:
         return voice_states[voice_id]
 
-    if voice_id in available_voices and tts_model:
+    if voice_id not in available_voices:
+        return None
+
+    # Piper voices: return lightweight pseudo-state
+    if available_voices[voice_id].get("engine") == "piper":
+        voice_states[voice_id] = {"engine": "piper", "voice_id": voice_id}
+        return voice_states[voice_id]
+
+    # Pocket voices: load from audio file
+    if tts_model:
         voice_file = available_voices[voice_id]["file"]
         try:
             print(f"[INFO] Loading voice state for: {voice_id}")
@@ -378,30 +459,17 @@ class OpenAITTSRequest(BaseModel):
 @app.post("/v1/audio/speech")
 async def create_speech(request: OpenAITTSRequest):
     """
-    OpenAI-compatible TTS endpoint
+    OpenAI-compatible TTS endpoint (Pocket TTS and Piper voices)
     """
-    if not tts_model:
+    if not tts_model and not PIPER_AVAILABLE:
         raise HTTPException(
             status_code=503,
-            detail="TTS service not available. Please install pocket_tts: pip install pocket-tts",
+            detail="TTS service not available. Install pocket_tts and/or piper-tts.",
         )
 
     try:
-        # Get voice state
-        voice_state = None
-        if request.voice in voice_states:
-            voice_state = voice_states[request.voice]
-        elif request.voice in available_voices:
-            # Load voice state on demand
-            voice_file = available_voices[request.voice]["file"]
-            try:
-                voice_state = tts_model.get_state_for_audio_prompt(voice_file)
-                voice_states[request.voice] = voice_state
-            except Exception as e:
-                print(f"[WARNING] Failed to load voice state: {e}")
-
+        voice_state = get_voice_state(request.voice)
         if not voice_state:
-            # Use default voice if available
             if "default" in voice_states:
                 voice_state = voice_states["default"]
             else:
@@ -409,17 +477,28 @@ async def create_speech(request: OpenAITTSRequest):
                     status_code=400, detail=f"Voice '{request.voice}' not found"
                 )
 
-        # Generate audio
-        audio = tts_model.generate_audio(voice_state, request.input)
-
-        # Convert to WAV (move to CPU first if tensor is on GPU/XPU)
-        audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
-
-        # Create WAV file in memory
-        wav_buffer = io.BytesIO()
-        scipy.io.wavfile.write(wav_buffer, tts_model.sample_rate, audio_np)
-        wav_buffer.seek(0)
-        audio_data = wav_buffer.read()
+        # Piper path
+        if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
+            audio_data = _piper_synthesize_to_wav_bytes(
+                voice_state["voice_id"], request.input
+            )
+            if not audio_data:
+                raise HTTPException(
+                    status_code=500, detail="Piper TTS generation failed"
+                )
+        else:
+            # Pocket path
+            if not tts_model:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Pocket TTS not available for this voice.",
+                )
+            audio = tts_model.generate_audio(voice_state, request.input)
+            audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
+            wav_buffer = io.BytesIO()
+            scipy.io.wavfile.write(wav_buffer, tts_model.sample_rate, audio_np)
+            wav_buffer.seek(0)
+            audio_data = wav_buffer.read()
 
         # Convert to requested format if needed
         if request.response_format == "mp3":
@@ -683,17 +762,26 @@ def split_into_sentences(text):
 
 
 def generate_sentence_audio_sync(voice_state, sentence):
-    """Generate audio for a single sentence (synchronous version for thread pool)"""
+    """Generate audio for a single sentence (synchronous). Supports Pocket and Piper."""
     try:
+        # Piper path
+        if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
+            audio_bytes = _piper_synthesize_to_wav_bytes(
+                voice_state["voice_id"], sentence
+            )
+            if audio_bytes:
+                return base64.b64encode(audio_bytes).decode()
+            return None
+
+        # Pocket path
+        if not tts_model:
+            return None
         audio = tts_model.generate_audio(voice_state, sentence)
         audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
-
-        # Convert to WAV
         wav_buffer = io.BytesIO()
         scipy.io.wavfile.write(wav_buffer, tts_model.sample_rate, audio_np)
         wav_buffer.seek(0)
         audio_bytes = wav_buffer.read()
-
         return base64.b64encode(audio_bytes).decode()
     except Exception as e:
         print(f"[WARNING] Failed to generate audio for sentence: {e}")
@@ -708,20 +796,10 @@ async def stream_chat_response(request: VoiceChatRequest):
     try:
         print(f"[INFO] Starting TRUE stream_chat_response with voice: {request.voice}")
 
-        # Get voice state (load once at start)
-        voice_state = None
-        if tts_model:
-            print(f"[INFO] Getting voice state for: {request.voice}")
-            if request.voice in voice_states:
-                voice_state = voice_states[request.voice]
-            elif request.voice in available_voices:
-                voice_file = available_voices[request.voice]["file"]
-                try:
-                    voice_state = tts_model.get_state_for_audio_prompt(voice_file)
-                    voice_states[request.voice] = voice_state
-                    print(f"[INFO] Voice state loaded")
-                except Exception as e:
-                    print(f"[WARNING] Failed to load voice state: {e}")
+        # Get voice state (Pocket or Piper)
+        voice_state = get_voice_state(request.voice)
+        if voice_state:
+            print(f"[INFO] Using voice for stream: {request.voice}")
 
         # Buffers
         sentence_buffer = ""
@@ -837,35 +915,30 @@ async def chat_completions(request: VoiceChatRequest):
         else:
             response_text = "Sorry, I couldn't generate a response."
 
-        # Generate TTS for the response
+        # Generate TTS for the response (Pocket or Piper)
         audio_data = None
-        if tts_model:
-            voice_state = None
-            if request.voice in voice_states:
-                voice_state = voice_states[request.voice]
-            elif request.voice in available_voices:
-                voice_file = available_voices[request.voice]["file"]
-                try:
-                    voice_state = tts_model.get_state_for_audio_prompt(voice_file)
-                    voice_states[request.voice] = voice_state
-                except Exception as e:
-                    print(f"[WARNING] Failed to load voice state: {e}")
-
-            if voice_state:
-                try:
-                    audio = tts_model.generate_audio(voice_state, response_text)
-                    audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
-
-                    # Convert to WAV in memory
-                    wav_buffer = io.BytesIO()
-                    scipy.io.wavfile.write(wav_buffer, tts_model.sample_rate, audio_np)
-                    wav_buffer.seek(0)
-                    audio_bytes = wav_buffer.read()
-
-                    # Encode to base64
-                    audio_data = base64.b64encode(audio_bytes).decode()
-                except Exception as e:
-                    print(f"[WARNING] TTS generation failed: {e}")
+        voice_state = get_voice_state(request.voice)
+        if voice_state:
+            try:
+                if isinstance(voice_state, dict) and voice_state.get("engine") == "piper":
+                    audio_bytes = _piper_synthesize_to_wav_bytes(
+                        voice_state["voice_id"], response_text
+                    )
+                    if audio_bytes:
+                        audio_data = base64.b64encode(audio_bytes).decode()
+                else:
+                    if tts_model:
+                        audio = tts_model.generate_audio(voice_state, response_text)
+                        audio_np = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
+                        wav_buffer = io.BytesIO()
+                        scipy.io.wavfile.write(
+                            wav_buffer, tts_model.sample_rate, audio_np
+                        )
+                        wav_buffer.seek(0)
+                        audio_bytes = wav_buffer.read()
+                        audio_data = base64.b64encode(audio_bytes).decode()
+            except Exception as e:
+                print(f"[WARNING] TTS generation failed: {e}")
 
         return {
             "id": llm_response.get("id", f"chatcmpl-{datetime.now().timestamp()}"),

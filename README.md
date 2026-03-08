@@ -72,6 +72,7 @@ Double-click **`run_pocket_tts.bat`**
 - 4000 token support for long responses
 - 180-second timeout for slow LLMs
 - CPU optimized (GPU optional); **Intel Arc** via XPU supported — see [INTEL_ARC.md](INTEL_ARC.md)
+- **Piper** voice models supported (optional) — see [PIPER.md](PIPER.md)
 - 76+ voices included (celebrities, characters, custom)
 
 ---
