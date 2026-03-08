@@ -881,6 +881,8 @@ async def create_speech(request: OpenAITTSRequest):
             },
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
 
