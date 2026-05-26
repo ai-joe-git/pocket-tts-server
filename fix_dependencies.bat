@@ -12,18 +12,19 @@ if not exist venv (
     exit /b 1
 )
 
-echo [1/4] Activating virtual environment...
+echo [1/5] Activating virtual environment...
 call venv\Scripts\activate.bat
 
-echo [2/4] Upgrading pip...
+echo [2/5] Upgrading pip...
 python -m pip install --upgrade pip setuptools wheel
 
 echo.
-echo [3/4] Reinstalling critical packages...
+echo [3/5] Reinstalling critical packages...
 pip install --force-reinstall pocket-tts soundfile scipy numpy pydub
+pip install audioop-lts
 
 echo.
-echo [4/4] Verifying installation...
+echo [4/5] Verifying installation...
 python -c "import pocket_tts; print('[OK] pocket_tts:', pocket_tts.__version__)" 2>nul
 if errorlevel 1 (
     echo [ERROR] Verification failed
@@ -31,6 +32,10 @@ if errorlevel 1 (
     pip uninstall pocket-tts -y
     pip install pocket-tts
 )
+
+echo.
+echo [5/5] Running preflight checks (ffmpeg, HuggingFace auth)...
+call preflight_checks.bat
 
 echo.
 echo ========================================

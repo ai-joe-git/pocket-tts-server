@@ -34,6 +34,9 @@ Double-click **`install_pocket_tts.bat`**
 - Installs Python (if needed)
 - Creates virtual environment
 - Installs all dependencies automatically
+- Runs preflight checks — installs `ffmpeg` via `winget` if missing, and prompts for HuggingFace login (needed for the voice-cloning weights)
+
+> **Before running:** create a free [HuggingFace account](https://huggingface.co/join). The installer will pause and ask you to accept the [`kyutai/pocket-tts` model terms](https://huggingface.co/kyutai/pocket-tts) and paste a [Read access token](https://huggingface.co/settings/tokens). Without this, custom voices return `Voice not found`.
 
 ### Step 2: Run
 Double-click **`run_pocket_tts.bat`**
@@ -253,6 +256,17 @@ Edit `config.json` or use Settings page:
 - [ ] Verify LLM server running on correct port
 - [ ] Check API URL matches your LLM (Settings page)
 - [ ] Timeout is 180s - increase if needed
+
+### ❌ "Voice 'X' not found" / "Failed to load voice state"
+HuggingFace authentication is missing or you haven't accepted the model terms.
+- [ ] Visit https://huggingface.co/kyutai/pocket-tts and click "Agree and access repository" (one-time, browser only)
+- [ ] From the activated venv, run `hf auth login` and paste a Read token from https://huggingface.co/settings/tokens
+- [ ] Or rerun `fix_dependencies.bat` — the preflight walks you through both steps
+
+### ❌ MP3/OGG upload fails with "pydub not installed"
+The message is misleading; pydub itself is installed but can't load.
+- [ ] **Python 3.13+:** rerun `fix_dependencies.bat` to install `audioop-lts` (the stdlib `audioop` module was removed by [PEP 594](https://peps.python.org/pep-0594/) and pydub still depends on it)
+- [ ] **Missing ffmpeg:** the preflight installs it via `winget`; if winget is unavailable, grab a static build from https://www.gyan.dev/ffmpeg/builds/ and add the `bin` folder to PATH, then restart your shell
 
 ---
 
