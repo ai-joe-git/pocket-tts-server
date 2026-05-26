@@ -114,10 +114,14 @@ if errorlevel 1 (
 )
 
 REM Create output directories
-echo [5/5] Creating directories...
+echo [5/6] Creating directories...
 if not exist output mkdir output
 if not exist temp mkdir temp
 if not exist logs mkdir logs
+
+echo.
+echo [6/6] Running preflight checks (ffmpeg, HuggingFace auth)...
+call preflight_checks.bat
 
 echo.
 echo ========================================
